@@ -7,14 +7,21 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
+def markdown_cell(value: Any) -> str:
+    cell = " ".join(str(value).splitlines())
+    return cell.replace("|", r"\|").strip()
+
+
 def _template_env() -> Environment:
     root = Path(__file__).resolve().parents[2] / "templates"
-    return Environment(
+    env = Environment(
         loader=FileSystemLoader(root),
         autoescape=select_autoescape(enabled_extensions=()),
         trim_blocks=True,
         lstrip_blocks=True,
     )
+    env.filters["markdown_cell"] = markdown_cell
+    return env
 
 
 def render_obsidian_markdown(source: dict[str, Any]) -> str:

@@ -31,6 +31,15 @@ def test_render_obsidian_markdown_keeps_rejected_for_audit():
     assert "rejected" in rendered
 
 
+def test_overview_table_escapes_pipes_and_newlines():
+    source = load_source(SAMPLE)
+    source["entries"][0]["zh_tw_meaning"] = "A|B\nC"
+
+    markdown = render_obsidian_markdown(source)
+
+    assert "A\\|B C" in markdown
+
+
 def test_write_obsidian_markdown(tmp_path):
     source = load_source(SAMPLE)
 

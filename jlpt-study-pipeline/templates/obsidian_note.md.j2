@@ -19,7 +19,7 @@ verification_policy: {{ metadata.verification_policy }}
 | ID | 日文 | 讀音 | 級別推定 | 繁中意思 | 校對 |
 |---|---|---|---|---|---|
 {% for entry in entries -%}
-| {{ entry.id }} | {{ entry.term }} | {{ entry.kana }} | {{ entry.jlpt_level_estimate }} | {{ entry.zh_tw_meaning }} | {{ entry.verification_status }} |
+| {{ entry.id | markdown_cell }} | {{ entry.term | markdown_cell }} | {{ entry.kana | markdown_cell }} | {{ entry.jlpt_level_estimate | markdown_cell }} | {{ entry.zh_tw_meaning | markdown_cell }} | {{ entry.verification_status | markdown_cell }} |
 {% endfor %}
 
 ## 詳細詞條
