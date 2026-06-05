@@ -1,0 +1,71 @@
+{
+  "metadata": {
+    "topic": "JLPT N1/N2 擬聲詞",
+    "target_levels": ["N1", "N2"],
+    "language": "ja-zh-TW",
+    "created_by": "codex",
+    "verification_policy": "ai_generated_requires_review"
+  },
+  "entries": [
+    {
+      "id": "ono-001",
+      "term": "しみじみ",
+      "kana": "しみじみ",
+      "kanji": "",
+      "accent": "",
+      "jlpt_level_estimate": "N2",
+      "category": "onomatopoeia",
+      "subcategory": "emotion",
+      "zh_tw_meaning": "深切地、由衷地；靜靜感受某種情緒",
+      "usage_note_zh_tw": "常用於表達深刻感受、感慨或細細體會。",
+      "example_ja": "卒業式で先生の言葉をしみじみと思い出した。",
+      "example_zh_tw": "在畢業典禮上，我深深想起老師說過的話。",
+      "recall_prompt_zh_tw": "表示深切感受、由衷感慨的日文擬態語是？",
+      "similar_terms": ["つくづく"],
+      "contrast_note_zh_tw": "「つくづく」更偏向反覆思考後的強烈感受。",
+      "exam_risk_note_zh_tw": "JLPT 級別為推定；需與教材或語料庫交叉確認。",
+      "verification_status": "needs_review",
+      "source_note": "AI-generated; verify before exam-critical use."
+    },
+    {
+      "id": "ono-002",
+      "term": "ぐずぐず",
+      "kana": "ぐずぐず",
+      "kanji": "",
+      "accent": "",
+      "jlpt_level_estimate": "N2",
+      "category": "onomatopoeia",
+      "subcategory": "behavior",
+      "zh_tw_meaning": "拖拖拉拉、磨蹭；狀態鬆散不清爽",
+      "usage_note_zh_tw": "可描述行動遲緩，也可描述天氣或物體狀態不佳。",
+      "example_ja": "ぐずぐずしていると、電車に乗り遅れるよ。",
+      "example_zh_tw": "再拖拖拉拉的話，會趕不上電車喔。",
+      "recall_prompt_zh_tw": "表示拖拖拉拉、磨蹭的日文擬態語是？",
+      "similar_terms": ["もたもた"],
+      "contrast_note_zh_tw": "「もたもた」更偏向動作笨拙或慢吞吞。",
+      "exam_risk_note_zh_tw": "JLPT 級別為推定；需與教材或語料庫交叉確認。",
+      "verification_status": "reviewed",
+      "source_note": "Sample entry for pipeline testing."
+    },
+    {
+      "id": "ono-003",
+      "term": "ざあざあ",
+      "kana": "ざあざあ",
+      "kanji": "",
+      "accent": "",
+      "jlpt_level_estimate": "unknown",
+      "category": "onomatopoeia",
+      "subcategory": "sound",
+      "zh_tw_meaning": "嘩啦嘩啦地下大雨或水流聲",
+      "usage_note_zh_tw": "常用於描述雨勢或水流很大。",
+      "example_ja": "雨がざあざあ降っている。",
+      "example_zh_tw": "雨嘩啦嘩啦地下著。",
+      "recall_prompt_zh_tw": "表示大雨或水流嘩啦嘩啦聲的日文擬聲詞是？",
+      "similar_terms": [],
+      "contrast_note_zh_tw": "",
+      "exam_risk_note_zh_tw": "示範 rejected 條目；預設不輸出到 Anki 或影片。",
+      "verification_status": "rejected",
+      "source_note": "Rejected sample entry for skip behavior."
+    }
+  ]
+}
