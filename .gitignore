@@ -1,0 +1,21 @@
+.claude-sandbox/
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment files
+.env
+.env.*
+
+# Generated pipeline output
+out/
+*.apkg
+*.mp4
+*.mp3
+*.wav
