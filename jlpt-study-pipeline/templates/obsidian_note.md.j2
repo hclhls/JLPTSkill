@@ -1,0 +1,47 @@
+---
+topic: {{ metadata.topic }}
+target_levels:{% for level in metadata.target_levels %}
+  - {{ level }}{% endfor %}
+language: {{ metadata.language }}
+verification_policy: {{ metadata.verification_policy }}
+---
+
+# {{ metadata.topic }}
+
+## 校對狀態
+
+{% for status, count in status_counts.items() -%}
+- {{ status }}: {{ count }}
+{% endfor %}
+
+## 詞條總覽
+
+| ID | 日文 | 讀音 | 級別推定 | 繁中意思 | 校對 |
+|---|---|---|---|---|---|
+{% for entry in entries -%}
+| {{ entry.id }} | {{ entry.term }} | {{ entry.kana }} | {{ entry.jlpt_level_estimate }} | {{ entry.zh_tw_meaning }} | {{ entry.verification_status }} |
+{% endfor %}
+
+## 詳細詞條
+
+{% for entry in entries -%}
+### {{ entry.id }} {{ entry.term }}
+
+- 讀音：{{ entry.kana }}
+- 漢字：{{ entry.kanji or "無" }}
+- 級別推定：{{ entry.jlpt_level_estimate }}
+- 分類：{{ entry.category }}{% if entry.subcategory %} / {{ entry.subcategory }}{% endif %}
+- 繁中解釋：{{ entry.zh_tw_meaning }}
+{% if entry.usage_note_zh_tw %}- 使用備註：{{ entry.usage_note_zh_tw }}
+{% endif -%}
+- 日文例句：{{ entry.example_ja }}
+- 例句翻譯：{{ entry.example_zh_tw }}
+{% if entry.similar_terms %}- 相近詞：{{ entry.similar_terms | join("、") }}
+{% endif -%}
+{% if entry.contrast_note_zh_tw %}- 對比備註：{{ entry.contrast_note_zh_tw }}
+{% endif -%}
+{% if entry.exam_risk_note_zh_tw %}- 考試風險：{{ entry.exam_risk_note_zh_tw }}
+{% endif -%}
+- 校對狀態：{{ entry.verification_status }}
+
+{% endfor %}
