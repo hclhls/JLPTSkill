@@ -43,6 +43,19 @@ def test_duplicate_id_is_error():
     assert any("Duplicate id" in error.message for error in report.errors)
 
 
+def test_malformed_id_type_is_error_not_crash():
+    source = load_source(SAMPLE)
+    source["entries"][0]["id"] = []
+
+    report = validate_source(source)
+
+    assert not report.ok
+    assert any(
+        issue.path == "entries[0].id" and "id must be a non-empty string" in issue.message
+        for issue in report.errors
+    )
+
+
 def test_invalid_enum_values_are_errors():
     source = _sample_source()
     source["entries"][0]["jlpt_level_estimate"] = "N3"

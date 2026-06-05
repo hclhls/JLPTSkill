@@ -33,7 +33,7 @@ def validate_source(source: dict[str, Any]) -> ValidationReport:
         report.add_error("entries", "entries must be a non-empty list")
         return report
 
-    seen_ids: dict[Any, int] = {}
+    seen_ids: dict[str, int] = {}
     for index, entry in enumerate(entries):
         entry_path = f"entries[{index}]"
         if not isinstance(entry, dict):
@@ -47,7 +47,9 @@ def validate_source(source: dict[str, Any]) -> ValidationReport:
 
         entry_id = entry.get("id")
         if entry_id not in (None, ""):
-            if entry_id in seen_ids:
+            if not isinstance(entry_id, str):
+                report.add_error(f"{entry_path}.id", "id must be a non-empty string")
+            elif entry_id in seen_ids:
                 report.add_error(f"{entry_path}.id", f"Duplicate id: {entry_id}")
             else:
                 seen_ids[entry_id] = index
