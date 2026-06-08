@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import genanki
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from .models import active_entries
 
@@ -19,7 +19,7 @@ def _template_env() -> Environment:
     root = Path(__file__).resolve().parents[2] / "templates"
     return Environment(
         loader=FileSystemLoader(root),
-        autoescape=select_autoescape(enabled_extensions=("html",)),
+        autoescape=True,
         trim_blocks=True,
         lstrip_blocks=True,
     )
@@ -61,15 +61,21 @@ def build_anki_notes(source: dict[str, Any]) -> list[dict[str, str]]:
 
 def _tags(entry: dict[str, Any]) -> str:
     return " ".join(
-        part
-        for part in [
-            "jlpt",
-            str(entry.get("jlpt_level_estimate", "unknown")).replace("/", "_"),
-            str(entry.get("category", "uncategorized")),
-            str(entry.get("verification_status", "unknown")),
+        [
+            _tag("jlpt", "jlpt"),
+            _tag(entry.get("jlpt_level_estimate"), "unknown"),
+            _tag(entry.get("category"), "uncategorized"),
+            _tag(entry.get("verification_status"), "unknown"),
         ]
-        if part
     )
+
+
+def _tag(value: Any, fallback: str) -> str:
+    raw = str(value if value not in (None, "") else fallback).lower()
+    normalized = raw.replace("/", "_")
+    normalized = re.sub(r"[^\w-]+", "_", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"[_-]+", "_", normalized).strip("_-")
+    return normalized or fallback
 
 
 def write_anki_csv(source: dict[str, Any], out_dir: Path) -> Path:

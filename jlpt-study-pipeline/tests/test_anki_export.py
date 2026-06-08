@@ -19,6 +19,29 @@ def test_build_anki_notes_creates_two_cards_per_active_entry():
     assert {note["direction"] for note in notes} == {"ja_to_zh", "zh_to_ja"}
 
 
+def test_build_anki_notes_escapes_html_values():
+    source = load_source(SAMPLE)
+    source["entries"][0]["term"] = "<b>&bad</b>"
+
+    notes = build_anki_notes(source)
+
+    assert "&lt;b&gt;&amp;bad&lt;/b&gt;" in notes[0]["front"]
+    assert "<b>&bad</b>" not in notes[0]["front"]
+
+
+def test_build_anki_notes_sanitizes_tags():
+    source = load_source(SAMPLE)
+    source["entries"][0]["category"] = "sound effect / intense rain"
+    source["entries"][0]["jlpt_level_estimate"] = "N1/N2"
+
+    notes = build_anki_notes(source)
+    tags = notes[0]["tags"].split()
+
+    assert "n1_n2" in tags
+    assert "sound_effect_intense_rain" in tags
+    assert all(" " not in tag for tag in tags)
+
+
 def test_write_anki_csv_skips_rejected_entries(tmp_path):
     source = load_source(SAMPLE)
     output = write_anki_csv(source, tmp_path)
