@@ -8,7 +8,7 @@ from typing import Sequence
 from .anki import write_anki_csv, write_anki_package
 from .models import ValidationReport
 from .obsidian import write_obsidian_markdown
-from .tts import DEFAULT_VOICE, estimate_tts_chars, synthesize_entries
+from .tts import DEFAULT_PROVIDER, DEFAULT_VOICE, estimate_tts_chars, synthesize_entries
 from .validation import load_source, render_validation_report, validate_source
 from .video import build_video_assets, ffmpeg_available
 
@@ -36,8 +36,8 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--deck-name", required=True)
     build.add_argument(
         "--tts-provider",
-        default="azure",
-        choices=["azure", "openai", "none"],
+        default=DEFAULT_PROVIDER,
+        choices=["edge", "none"],
     )
     build.add_argument("--voice", default=DEFAULT_VOICE)
     build.add_argument("--slug", default="jlpt-study")

@@ -1,6 +1,6 @@
 # JLPT Study Pipeline
 
-A Codex skill and Python pipeline for generating JLPT study packages: Obsidian Markdown, Anki cards, subtitles, Azure Speech TTS audio, and optional MP4 videos.
+A Codex skill and Python pipeline for generating JLPT study packages: Obsidian Markdown, Anki cards, subtitles, edge-tts audio, and optional MP4 videos.
 
 ## Setup
 
@@ -13,21 +13,19 @@ pip install -r requirements.txt
 
 Install `ffmpeg` separately if MP4 output is needed.
 
-## Azure Speech
+## edge-tts
 
-Azure Speech is the default TTS provider. Set these environment variables:
+edge-tts is the default TTS provider. It does not require an API key or project-specific endpoint configuration. It does require the `edge-tts` command from the Python package and network access to the Microsoft Edge TTS service.
+
+The default voice is `ja-JP-NanamiNeural`. Override it with `--voice` if needed.
+
+List available voices:
 
 ```bash
-export AZURE_SPEECH_KEY="..."
-export AZURE_SPEECH_REGION="..."
+edge-tts --list-voices
 ```
 
-The default voice is `ja-JP-NanamiNeural`. Override it with `--voice` if the voice is unavailable in your Azure region.
-
-Check official Microsoft pricing and quota pages before large generation:
-
-- https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits
-- https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/
+Project reference: https://github.com/rany2/edge-tts
 
 ## Commands
 
@@ -43,14 +41,14 @@ Estimate TTS usage:
 python scripts/jlpt_pipeline.py dry-run --source examples/source.sample.json --out out/sample
 ```
 
-Build all outputs with Azure Speech:
+Build all outputs with edge-tts:
 
 ```bash
 python scripts/jlpt_pipeline.py build \
   --source examples/source.sample.json \
   --out out/sample \
   --deck-name "Sample JLPT" \
-  --tts-provider azure \
+  --tts-provider edge \
   --voice ja-JP-NanamiNeural \
   --slug sample \
   --video

@@ -7,4 +7,4 @@
 - JLPT 級別若非官方來源確認，標記為推定。
 - `verification_status` 預設為 `needs_review`。
 - 產出 Obsidian Markdown、Anki 雙向卡、字幕、旁白文字與影片素材。
-- TTS 預設使用 Azure Speech；沒有憑證時降級成無聲影片素材。
+- TTS 預設使用 edge-tts；不需要 API key，無法產生語音時可降級成無聲影片素材。

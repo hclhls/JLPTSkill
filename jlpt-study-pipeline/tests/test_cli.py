@@ -83,9 +83,12 @@ def test_build_command_writes_core_outputs_without_tts(tmp_path):
     assert (tmp_path / "validation_report.md").exists()
 
 
-def test_build_with_azure_missing_credentials_warns_and_returns_0(tmp_path, monkeypatch):
-    monkeypatch.delenv("AZURE_SPEECH_KEY", raising=False)
-    monkeypatch.delenv("AZURE_SPEECH_REGION", raising=False)
+def test_build_with_edge_tts_failure_warns_and_returns_0(tmp_path, monkeypatch):
+    def fail_edge_tts(source, out_dir, provider="edge", voice="ja-JP-NanamiNeural", max_chars=None, use_cache=True):
+        from jlpt_pipeline.tts import TtsResult
+        return TtsResult(errors=["edge tts failed"], skipped=4)
+
+    monkeypatch.setattr(cli, "synthesize_entries", fail_edge_tts)
 
     result = main(
         [
@@ -97,7 +100,7 @@ def test_build_with_azure_missing_credentials_warns_and_returns_0(tmp_path, monk
             "--deck-name",
             "Sample JLPT",
             "--tts-provider",
-            "azure",
+            "edge",
             "--slug",
             "sample",
         ]
@@ -106,7 +109,7 @@ def test_build_with_azure_missing_credentials_warns_and_returns_0(tmp_path, monk
     assert result == 0
     report_text = (tmp_path / "validation_report.md").read_text(encoding="utf-8")
     assert "TTS status: WARN" in report_text
-    assert "AZURE_SPEECH_KEY and AZURE_SPEECH_REGION" in report_text
+    assert "edge tts failed" in report_text
 
 
 def test_build_video_asset_failure_is_reported_and_returns_0(tmp_path, monkeypatch):

@@ -10,7 +10,7 @@ def test_skill_mentions_required_workflow_terms():
         "source.json",
         "verification_status",
         "needs_review",
-        "Azure Speech",
+        "edge-tts",
         "Obsidian",
         "Anki",
         "video",
@@ -19,15 +19,15 @@ def test_skill_mentions_required_workflow_terms():
     assert missing == []
 
 
-def test_readme_mentions_azure_environment_variables_and_commands():
+def test_readme_mentions_edge_tts_and_commands():
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     required = [
-        "AZURE_SPEECH_KEY",
-        "AZURE_SPEECH_REGION",
+        "edge-tts",
         "validate",
         "dry-run",
         "build",
-        "--tts-provider azure",
+        "--tts-provider edge",
+        "--tts-provider none",
     ]
     missing = [item for item in required if item not in text]
     assert missing == []

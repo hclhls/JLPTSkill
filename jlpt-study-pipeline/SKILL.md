@@ -1,6 +1,6 @@
 ---
 name: jlpt-study-pipeline
-description: Generate JLPT study packages with Obsidian Markdown, Anki cards, Azure Speech TTS assets, and immersive video outputs from a user-provided Japanese study topic.
+description: Generate JLPT study packages with Obsidian Markdown, Anki cards, edge-tts audio assets, and immersive video outputs from a user-provided Japanese study topic.
 ---
 
 # JLPT Study Pipeline
@@ -46,28 +46,29 @@ python scripts/jlpt_pipeline.py build \
   --source path/to/source.json \
   --out path/to/output \
   --deck-name "JLPT Study" \
-  --tts-provider azure \
+  --tts-provider edge \
   --voice ja-JP-NanamiNeural \
   --video
 ```
 
-The pipeline exports Obsidian Markdown, Anki `.apkg`, `anki.csv`, `narration.txt`, `subtitles.ass`, optional Azure Speech audio, optional `video.mp4`, and `validation_report.md`.
+The pipeline exports Obsidian Markdown, Anki `.apkg`, `anki.csv`, `narration.txt`, `subtitles.ass`, optional edge-tts audio, optional `video.mp4`, and `validation_report.md`.
 
-If Azure credentials are unavailable, use `--tts-provider none` so the user still gets Markdown, Anki, subtitles, narration, and silent video assets.
+If edge-tts is unavailable or audio is not needed, use `--tts-provider none` so the user still gets Markdown, Anki, subtitles, narration, and silent video assets.
 
-## Azure Speech
+## edge-tts
 
-Azure Speech is the default TTS provider. The environment must define:
-
-```text
-AZURE_SPEECH_KEY
-AZURE_SPEECH_REGION
-```
+edge-tts is the default TTS provider. It does not require an API key, but it does require the `edge-tts` command from the Python package and network access to the Microsoft Edge TTS service.
 
 Use `dry-run` before large generations to estimate character usage:
 
 ```bash
 python scripts/jlpt_pipeline.py dry-run --source path/to/source.json --out path/to/output
+```
+
+List available voices with:
+
+```bash
+edge-tts --list-voices
 ```
 
 ## Reporting

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from xml.sax.saxutils import escape
-
-import requests
 
 from .models import active_entries
 
+DEFAULT_PROVIDER = "edge"
 DEFAULT_VOICE = "ja-JP-NanamiNeural"
 
 
@@ -38,7 +36,7 @@ class TtsResult:
     errors: list[str] = field(default_factory=list)
 
 
-def tts_items(source: dict[str, Any], voice: str = DEFAULT_VOICE) -> list[TtsItem]:
+def tts_items(source: dict[str, Any]) -> list[TtsItem]:
     items: list[TtsItem] = []
     for entry in active_entries(source):
         entry_id = str(entry["id"])
@@ -47,22 +45,22 @@ def tts_items(source: dict[str, Any], voice: str = DEFAULT_VOICE) -> list[TtsIte
     return items
 
 
-def estimate_tts_chars(source: dict[str, Any], voice: str = DEFAULT_VOICE) -> TtsEstimate:
-    items = tts_items(source, voice=voice)
+def estimate_tts_chars(source: dict[str, Any]) -> TtsEstimate:
+    items = tts_items(source)
     return TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
 
 
 def synthesize_entries(
     source: dict[str, Any],
     out_dir: Path,
-    provider: str = "azure",
+    provider: str = DEFAULT_PROVIDER,
     voice: str = DEFAULT_VOICE,
     max_chars: int | None = None,
     use_cache: bool = True,
 ) -> TtsResult:
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    estimate = estimate_tts_chars(source, voice=voice)
+    estimate = estimate_tts_chars(source)
     result = TtsResult()
 
     if max_chars is not None and estimate.total_chars > max_chars:
@@ -75,8 +73,8 @@ def synthesize_entries(
         result.skipped = len(estimate.items)
         return result
 
-    if provider == "azure":
-        return _synthesize_azure(
+    if provider == "edge":
+        return _synthesize_edge(
             estimate.items, audio_dir, voice=voice, use_cache=use_cache
         )
 
@@ -84,7 +82,7 @@ def synthesize_entries(
     return result
 
 
-def _synthesize_azure(
+def _synthesize_edge(
     items: list[TtsItem],
     audio_dir: Path,
     voice: str = DEFAULT_VOICE,
@@ -92,24 +90,6 @@ def _synthesize_azure(
 ) -> TtsResult:
     audio_dir.mkdir(parents=True, exist_ok=True)
     result = TtsResult()
-    key = os.environ.get("AZURE_SPEECH_KEY")
-    region = os.environ.get("AZURE_SPEECH_REGION")
-    if not key or not region:
-        result.errors.append(
-            "AZURE_SPEECH_KEY and AZURE_SPEECH_REGION are required for Azure TTS"
-        )
-        result.skipped = len(items)
-        return result
-
-    endpoint = (
-        f"https://{region}.tts.speech.microsoft.com/"
-        "cognitiveservices/v1"
-    )
-    headers = {
-        "Ocp-Apim-Subscription-Key": key,
-        "Content-Type": "application/ssml+xml",
-        "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
-    }
 
     for item in items:
         output = _cache_path(audio_dir, item, voice)
@@ -117,36 +97,38 @@ def _synthesize_azure(
             result.skipped += 1
             continue
 
-        ssml = (
-            "<speak version='1.0' xml:lang='ja-JP'>"
-            f"<voice name='{_escape_xml(voice)}'>"
-            f"{_escape_xml(item.text)}"
-            "</voice>"
-            "</speak>"
-        )
+        command = [
+            "edge-tts",
+            "--voice",
+            voice,
+            "--text",
+            item.text,
+            "--write-media",
+            str(output),
+        ]
         try:
-            response = requests.post(
-                endpoint,
-                headers=headers,
-                data=ssml.encode("utf-8"),
-                timeout=30,
-            )
-        except requests.RequestException as error:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except FileNotFoundError:
             result.errors.append(
-                f"Azure TTS failed for {item.entry_id}:{item.kind}: {error}"
+                f"edge-tts command not found for {item.entry_id}:{item.kind}"
             )
             result.skipped += 1
             continue
-        if response.status_code >= 400:
+        except subprocess.CalledProcessError as error:
+            detail = error.stderr or error.stdout or str(error)
             result.errors.append(
-                f"Azure TTS failed for {item.entry_id}:{item.kind}: "
-                f"{response.status_code} {response.text}"
+                f"edge-tts failed for {item.entry_id}:{item.kind}: {detail}"
             )
             result.skipped += 1
             continue
 
-        output.write_bytes(response.content)
-        result.generated.append(output)
+        if output.exists():
+            result.generated.append(output)
+        else:
+            result.errors.append(
+                f"edge-tts did not create audio for {item.entry_id}:{item.kind}"
+            )
+            result.skipped += 1
 
     return result
 
@@ -154,7 +136,3 @@ def _synthesize_azure(
 def _cache_path(audio_dir: Path, item: TtsItem, voice: str = DEFAULT_VOICE) -> Path:
     digest = hashlib.sha1(f"{voice}:{item.text}".encode("utf-8")).hexdigest()
     return audio_dir / f"{digest}.mp3"
-
-
-def _escape_xml(value: Any) -> str:
-    return escape(str(value), {"'": "&apos;", '"': "&quot;"})
