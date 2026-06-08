@@ -19,7 +19,6 @@ class TtsItem:
     entry_id: str
     kind: str
     text: str
-    voice: str = DEFAULT_VOICE
 
     @property
     def chars(self) -> int:
@@ -34,7 +33,7 @@ class TtsEstimate:
 
 @dataclass
 class TtsResult:
-    created: list[Path] = field(default_factory=list)
+    generated: list[Path] = field(default_factory=list)
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -43,8 +42,8 @@ def tts_items(source: dict[str, Any], voice: str = DEFAULT_VOICE) -> list[TtsIte
     items: list[TtsItem] = []
     for entry in active_entries(source):
         entry_id = str(entry["id"])
-        items.append(TtsItem(entry_id, "term", str(entry["term"]), voice))
-        items.append(TtsItem(entry_id, "example", str(entry["example_ja"]), voice))
+        items.append(TtsItem(entry_id, "term", str(entry["term"])))
+        items.append(TtsItem(entry_id, "example_ja", str(entry["example_ja"])))
     return items
 
 
@@ -76,13 +75,15 @@ def synthesize_entries(
         return result
 
     if provider == "azure":
-        return _synthesize_azure(estimate.items, audio_dir)
+        return _synthesize_azure(estimate.items, audio_dir, voice=voice)
 
     result.errors.append(f"unknown tts provider: {provider}")
     return result
 
 
-def _synthesize_azure(items: list[TtsItem], audio_dir: Path) -> TtsResult:
+def _synthesize_azure(
+    items: list[TtsItem], audio_dir: Path, voice: str = DEFAULT_VOICE
+) -> TtsResult:
     audio_dir.mkdir(parents=True, exist_ok=True)
     result = TtsResult()
     key = os.environ.get("AZURE_SPEECH_KEY")
@@ -105,14 +106,14 @@ def _synthesize_azure(items: list[TtsItem], audio_dir: Path) -> TtsResult:
     }
 
     for item in items:
-        output = _cache_path(audio_dir, item)
+        output = _cache_path(audio_dir, item, voice)
         if output.exists():
             result.skipped += 1
             continue
 
         ssml = (
             "<speak version='1.0' xml:lang='ja-JP'>"
-            f"<voice name='{_escape_xml(item.voice)}'>"
+            f"<voice name='{_escape_xml(voice)}'>"
             f"{_escape_xml(item.text)}"
             "</voice>"
             "</speak>"
@@ -139,13 +140,13 @@ def _synthesize_azure(items: list[TtsItem], audio_dir: Path) -> TtsResult:
             continue
 
         output.write_bytes(response.content)
-        result.created.append(output)
+        result.generated.append(output)
 
     return result
 
 
-def _cache_path(audio_dir: Path, item: TtsItem) -> Path:
-    digest = hashlib.sha1(f"{item.voice}:{item.text}".encode("utf-8")).hexdigest()
+def _cache_path(audio_dir: Path, item: TtsItem, voice: str = DEFAULT_VOICE) -> Path:
+    digest = hashlib.sha1(f"{voice}:{item.text}".encode("utf-8")).hexdigest()
     return audio_dir / f"{digest}.mp3"
 
 

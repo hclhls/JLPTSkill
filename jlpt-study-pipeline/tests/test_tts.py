@@ -26,7 +26,7 @@ def test_synthesize_entries_none_provider_creates_audio_and_skips_items(tmp_path
     result = synthesize_entries(source, tmp_path, provider="none")
 
     assert (tmp_path / "audio").is_dir()
-    assert result.created == []
+    assert result.generated == []
     assert result.skipped == 4
     assert result.errors == []
     assert list((tmp_path / "audio").iterdir()) == []
@@ -37,7 +37,7 @@ def test_synthesize_entries_max_chars_error_generates_nothing(tmp_path):
 
     result = synthesize_entries(source, tmp_path, provider="none", max_chars=1)
 
-    assert result.created == []
+    assert result.generated == []
     assert result.skipped == 0
     assert any("max tts chars" in error for error in result.errors)
     assert list((tmp_path / "audio").iterdir()) == []
