@@ -58,6 +58,7 @@ def synthesize_entries(
     provider: str = "azure",
     voice: str = DEFAULT_VOICE,
     max_chars: int | None = None,
+    use_cache: bool = True,
 ) -> TtsResult:
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
@@ -75,14 +76,19 @@ def synthesize_entries(
         return result
 
     if provider == "azure":
-        return _synthesize_azure(estimate.items, audio_dir, voice=voice)
+        return _synthesize_azure(
+            estimate.items, audio_dir, voice=voice, use_cache=use_cache
+        )
 
     result.errors.append(f"unknown tts provider: {provider}")
     return result
 
 
 def _synthesize_azure(
-    items: list[TtsItem], audio_dir: Path, voice: str = DEFAULT_VOICE
+    items: list[TtsItem],
+    audio_dir: Path,
+    voice: str = DEFAULT_VOICE,
+    use_cache: bool = True,
 ) -> TtsResult:
     audio_dir.mkdir(parents=True, exist_ok=True)
     result = TtsResult()
@@ -102,12 +108,12 @@ def _synthesize_azure(
     headers = {
         "Ocp-Apim-Subscription-Key": key,
         "Content-Type": "application/ssml+xml",
-        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+        "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
     }
 
     for item in items:
         output = _cache_path(audio_dir, item, voice)
-        if output.exists():
+        if use_cache and output.exists():
             result.skipped += 1
             continue
 
