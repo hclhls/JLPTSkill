@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Sequence
 
 from .anki import write_anki_csv, write_anki_package
+from .models import ValidationReport
 from .obsidian import write_obsidian_markdown
 from .tts import DEFAULT_VOICE, estimate_tts_chars, synthesize_entries
 from .validation import load_source, render_validation_report, validate_source
@@ -53,14 +55,20 @@ def _add_source_out_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _validate_command(args: argparse.Namespace) -> int:
-    source = load_source(args.source)
+    source = _load_source_or_write_report(args.source, args.out)
+    if source is None:
+        return 1
+
     report = validate_source(source)
     _write_report(args.out, render_validation_report(report))
     return 0 if report.ok else 1
 
 
 def _dry_run_command(args: argparse.Namespace) -> int:
-    source = load_source(args.source)
+    source = _load_source_or_write_report(args.source, args.out)
+    if source is None:
+        return 1
+
     report = validate_source(source)
     if not report.ok:
         _write_report(args.out, render_validation_report(report))
@@ -77,7 +85,10 @@ def _dry_run_command(args: argparse.Namespace) -> int:
 
 
 def _build_command(args: argparse.Namespace) -> int:
-    source = load_source(args.source)
+    source = _load_source_or_write_report(args.source, args.out)
+    if source is None:
+        return 1
+
     report = validate_source(source)
     report_text = render_validation_report(report)
     if not report.ok:
@@ -87,7 +98,16 @@ def _build_command(args: argparse.Namespace) -> int:
     obsidian = write_obsidian_markdown(source, args.out, args.slug)
     anki_csv = write_anki_csv(source, args.out)
     anki_package = write_anki_package(source, args.out, args.deck_name)
-    video_assets = build_video_assets(source, args.out, make_video=args.video)
+    video_assets: dict[str, Path | None] = {
+        "narration": None,
+        "subtitles": None,
+        "video": None,
+    }
+    video_error = None
+    try:
+        video_assets = build_video_assets(source, args.out, make_video=args.video)
+    except Exception as error:
+        video_error = str(error)
     tts_result = synthesize_entries(
         source,
         args.out,
@@ -101,15 +121,21 @@ def _build_command(args: argparse.Namespace) -> int:
         f"- Obsidian markdown: {obsidian.name}",
         f"- Anki CSV: {anki_csv.name}",
         f"- Anki package: {anki_package.name}",
-        f"- Narration: {video_assets['narration'].name}",
-        f"- Subtitles: {video_assets['subtitles'].name}",
     ]
+    if video_assets["narration"] is not None:
+        output_lines.append(f"- Narration: {video_assets['narration'].name}")
+    if video_assets["subtitles"] is not None:
+        output_lines.append(f"- Subtitles: {video_assets['subtitles'].name}")
     if video_assets["video"] is not None:
         output_lines.append(f"- Video: {video_assets['video'].name}")
+    elif video_error is not None:
+        output_lines.append(f"- Warning: video assets failed: {video_error}")
     elif args.video and not ffmpeg_available():
         output_lines.append("- Warning: ffmpeg unavailable; video.mp4 was not created")
 
+    tts_status = "WARN" if tts_result.errors else "OK"
     tts_lines = [
+        f"TTS status: {tts_status}",
         f"- Provider: {args.tts_provider}",
         f"- Generated: {len(tts_result.generated)}",
         f"- Skipped: {tts_result.skipped}",
@@ -120,6 +146,16 @@ def _build_command(args: argparse.Namespace) -> int:
     report_text = _append_sections(report_text, "TTS", tts_lines)
     _write_report(args.out, report_text)
     return 0
+
+
+def _load_source_or_write_report(source_path: Path, out_dir: Path) -> dict | None:
+    try:
+        return load_source(source_path)
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        report = ValidationReport()
+        report.add_error("source", f"Source load error: {error}")
+        _write_report(out_dir, render_validation_report(report))
+        return None
 
 
 def _write_report(out_dir: Path, content: str) -> Path:
