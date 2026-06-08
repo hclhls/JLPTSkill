@@ -12,6 +12,9 @@ from .models import (
 )
 
 GENERIC_RECALL_PROMPTS = {"這是什麼？", "這是什麼?", "請回答"}
+REQUIRED_METADATA_STRING_FIELDS = {"topic", "language", "verification_policy"}
+REQUIRED_METADATA_LIST_FIELDS = {"target_levels"}
+REQUIRED_ENTRY_STRING_FIELDS = REQUIRED_ENTRY_FIELDS - {"id"}
 
 
 def load_source(path: Path) -> dict[str, Any]:
@@ -33,6 +36,8 @@ def validate_source(source: dict[str, Any]) -> ValidationReport:
         report.add_error("entries", "entries must be a non-empty list")
         return report
 
+    _validate_metadata(source, report)
+
     seen_ids: dict[str, int] = {}
     for index, entry in enumerate(entries):
         entry_path = f"entries[{index}]"
@@ -44,6 +49,21 @@ def validate_source(source: dict[str, Any]) -> ValidationReport:
             value = entry.get(field)
             if value is None or value == "":
                 report.add_error(f"{entry_path}.{field}", f"Missing required field: {field}")
+
+        for field in sorted(REQUIRED_ENTRY_STRING_FIELDS):
+            value = entry.get(field)
+            if value not in (None, "") and not isinstance(value, str):
+                report.add_error(f"{entry_path}.{field}", f"{field} must be a string")
+
+        similar_terms = entry.get("similar_terms")
+        if similar_terms not in (None, "") and (
+            not isinstance(similar_terms, list)
+            or any(not isinstance(term, str) for term in similar_terms)
+        ):
+            report.add_error(
+                f"{entry_path}.similar_terms",
+                "similar_terms must be a list of strings",
+            )
 
         entry_id = entry.get("id")
         if entry_id not in (None, ""):
@@ -94,6 +114,37 @@ def validate_source(source: dict[str, Any]) -> ValidationReport:
             )
 
     return report
+
+
+def _validate_metadata(source: dict[str, Any], report: ValidationReport) -> None:
+    metadata = source.get("metadata")
+    if not isinstance(metadata, dict):
+        report.add_error("metadata", "metadata must be an object")
+        return
+
+    for field in sorted(REQUIRED_METADATA_STRING_FIELDS):
+        value = metadata.get(field)
+        if value in (None, ""):
+            report.add_error(
+                f"metadata.{field}",
+                f"Missing required metadata field: {field}",
+            )
+        elif not isinstance(value, str):
+            report.add_error(f"metadata.{field}", f"{field} must be a string")
+
+    target_levels = metadata.get("target_levels")
+    if target_levels in (None, ""):
+        report.add_error(
+            "metadata.target_levels",
+            "Missing required metadata field: target_levels",
+        )
+    elif not isinstance(target_levels, list) or any(
+        not isinstance(level, str) for level in target_levels
+    ):
+        report.add_error(
+            "metadata.target_levels",
+            "target_levels must be a list of strings",
+        )
 
 
 def render_validation_report(report: ValidationReport) -> str:

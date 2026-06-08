@@ -87,3 +87,42 @@ def test_quality_warnings_are_rendered():
     assert "# Validation Report" in rendered
     assert "recall_prompt_zh_tw may be too generic" in rendered
     assert "needs_review" in rendered
+
+
+def test_required_scalar_fields_must_be_strings():
+    source = _sample_source()
+    source["entries"][0]["term"] = ["しみじみ"]
+    source["entries"][0]["example_ja"] = {"text": "卒業式で先生の言葉を思い出した。"}
+
+    report = validate_source(source)
+
+    assert not report.ok
+    assert any(
+        issue.path == "entries[0].term" and "term must be a string" in issue.message
+        for issue in report.errors
+    )
+    assert any(
+        issue.path == "entries[0].example_ja" and "example_ja must be a string" in issue.message
+        for issue in report.errors
+    )
+
+
+def test_metadata_required_fields_are_validated():
+    source = _sample_source()
+    source["metadata"] = {"topic": ["JLPT"], "target_levels": "N1", "language": "", "verification_policy": "ai_generated_requires_review"}
+
+    report = validate_source(source)
+
+    assert not report.ok
+    assert any(
+        issue.path == "metadata.topic" and "topic must be a string" in issue.message
+        for issue in report.errors
+    )
+    assert any(
+        issue.path == "metadata.target_levels" and "target_levels must be a list of strings" in issue.message
+        for issue in report.errors
+    )
+    assert any(
+        issue.path == "metadata.language" and "Missing required metadata field" in issue.message
+        for issue in report.errors
+    )

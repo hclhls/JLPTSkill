@@ -82,3 +82,14 @@ python scripts/jlpt_pipeline.py build \
 ## Source Data
 
 The pipeline expects a `source.json` file with `metadata` and `entries`. AI-generated entries should use `verification_status: needs_review` until checked against trusted material.
+
+## Install as a Codex Skill
+
+After local verification, install the skill into your personal Codex skill directory:
+
+```bash
+mkdir -p "$CODEX_HOME/skills"
+cp -R jlpt-study-pipeline "$CODEX_HOME/skills/jlpt-study-pipeline"
+```
+
+Do this only after reviewing the local project output. If `CODEX_HOME` is unset, use your Codex home directory and keep the final path as `skills/jlpt-study-pipeline`.
