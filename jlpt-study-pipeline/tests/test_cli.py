@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 
@@ -24,6 +25,21 @@ def test_dry_run_command_writes_character_estimate(tmp_path):
     assert result == 0
     report = tmp_path / "validation_report.md"
     assert "Estimated TTS characters" in report.read_text(encoding="utf-8")
+
+
+def test_dry_run_command_writes_validation_report_for_invalid_source(tmp_path):
+    source = tmp_path / "invalid.json"
+    source.write_text(
+        json.dumps({"entries": [{"id": "missing-term"}]}),
+        encoding="utf-8",
+    )
+
+    result = main(["dry-run", "--source", str(source), "--out", str(tmp_path)])
+
+    assert result == 1
+    report = tmp_path / "validation_report.md"
+    assert report.exists()
+    assert "Missing required field" in report.read_text(encoding="utf-8")
 
 
 def test_build_command_writes_core_outputs_without_tts(tmp_path):

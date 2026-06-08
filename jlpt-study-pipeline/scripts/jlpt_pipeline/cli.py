@@ -62,6 +62,10 @@ def _validate_command(args: argparse.Namespace) -> int:
 def _dry_run_command(args: argparse.Namespace) -> int:
     source = load_source(args.source)
     report = validate_source(source)
+    if not report.ok:
+        _write_report(args.out, render_validation_report(report))
+        return 1
+
     estimate = estimate_tts_chars(source)
     report_text = _append_sections(
         render_validation_report(report),
