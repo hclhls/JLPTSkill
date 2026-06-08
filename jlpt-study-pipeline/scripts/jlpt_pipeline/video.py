@@ -34,9 +34,20 @@ def ass_time(seconds: float) -> str:
 
 
 def escape_ass(text: Any) -> str:
-    return str(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", r"\N").replace(
-        "{", "("
-    ).replace("}", ")")
+    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    return (
+        normalized.replace("\\", "＼")
+        .replace("\n", r"\N")
+        .replace("{", "(")
+        .replace("}", ")")
+    )
+
+
+def ffmpeg_filter_path(path: Path) -> str:
+    escaped = path.as_posix().replace("\\", r"\\")
+    for char in ("'", ":", ",", "[", "]"):
+        escaped = escaped.replace(char, f"\\{char}")
+    return f"ass=filename='{escaped}'"
 
 
 def write_narration(source: dict[str, Any], out_dir: Path) -> Path:
@@ -120,7 +131,7 @@ def write_silent_video(source: dict[str, Any], out_dir: Path) -> Path | None:
             "-i",
             f"color=c=0x111111:s=1920x1080:d={duration}",
             "-vf",
-            f"ass={subtitles.as_posix()}",
+            ffmpeg_filter_path(subtitles),
             "-c:v",
             "libx264",
             "-pix_fmt",
