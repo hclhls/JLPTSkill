@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import fields
 import subprocess
 import sys
@@ -11,8 +12,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from jlpt_pipeline.tts import (
     DEFAULT_PROVIDER,
     DEFAULT_VOICE,
+    DEFAULT_ZH_TW_VOICE,
     TtsItem,
     TtsResult,
+    audio_paths_for_source,
     estimate_tts_chars,
     synthesize_entries,
     tts_items,
@@ -20,13 +23,33 @@ from jlpt_pipeline.tts import (
 from jlpt_pipeline.validation import load_source
 
 
-def test_tts_items_include_term_and_example_without_voice_field():
+def test_tts_items_include_japanese_and_zh_tw_video_voice_fields():
     source = load_source(SAMPLE)
 
     items = tts_items(source)
 
-    assert {item.kind for item in items} == {"term", "example_ja"}
-    assert [field.name for field in fields(TtsItem)] == ["entry_id", "kind", "text"]
+    assert [item.kind for item in items[:4]] == [
+        "term",
+        "zh_tw_meaning",
+        "example_ja",
+        "example_zh_tw",
+    ]
+    assert {item.kind for item in items} == {
+        "term",
+        "zh_tw_meaning",
+        "example_ja",
+        "example_zh_tw",
+    }
+    assert [field.name for field in fields(TtsItem)] == [
+        "entry_id",
+        "kind",
+        "text",
+        "voice",
+    ]
+    assert items[0].voice == DEFAULT_VOICE
+    assert items[1].voice == DEFAULT_ZH_TW_VOICE
+    assert items[2].voice == DEFAULT_VOICE
+    assert items[3].voice == DEFAULT_ZH_TW_VOICE
 
 
 def test_estimate_tts_chars_skips_rejected_entries():
@@ -39,9 +62,24 @@ def test_estimate_tts_chars_skips_rejected_entries():
     assert "ざあざあ" not in [item.text for item in estimate.items]
 
 
+def test_audio_paths_for_source_returns_paths_in_tts_item_order(tmp_path):
+    source = load_source(SAMPLE)
+
+    paths = audio_paths_for_source(source, tmp_path, voice="ja-JP-NanamiNeural")
+
+    assert [path.parent for path in paths] == [tmp_path / "audio"] * 8
+    expected_names = [
+        hashlib.sha1(f"{item.voice}:{item.text}".encode("utf-8")).hexdigest()
+        + ".mp3"
+        for item in tts_items(source)
+    ]
+    assert [path.name for path in paths] == expected_names
+
+
 def test_default_provider_is_edge():
     assert DEFAULT_PROVIDER == "edge"
     assert DEFAULT_VOICE == "ja-JP-NanamiNeural"
+    assert DEFAULT_ZH_TW_VOICE == "zh-TW-HsiaoChenNeural"
 
 
 def test_synthesize_entries_none_provider_creates_audio_and_skips_items(tmp_path):
@@ -51,7 +89,7 @@ def test_synthesize_entries_none_provider_creates_audio_and_skips_items(tmp_path
 
     assert (tmp_path / "audio").is_dir()
     assert result.generated == []
-    assert result.skipped == 4
+    assert result.skipped == 8
     assert result.errors == []
     assert list((tmp_path / "audio").iterdir()) == []
 
@@ -102,7 +140,7 @@ def test_edge_tts_success_writes_files_and_uses_expected_command(tmp_path, monke
 
     assert result.errors == []
     assert result.skipped == 0
-    assert len(result.generated) == 4
+    assert len(result.generated) == 8
     assert all(path.read_bytes() == b"edge-audio" for path in result.generated)
     assert calls[0]["command"][:5] == [
         "edge-tts",
@@ -110,6 +148,13 @@ def test_edge_tts_success_writes_files_and_uses_expected_command(tmp_path, monke
         "ja-JP-NanamiNeural",
         "--text",
         "しみじみ",
+    ]
+    assert calls[1]["command"][:5] == [
+        "edge-tts",
+        "--voice",
+        "zh-TW-HsiaoChenNeural",
+        "--text",
+        "深切地、由衷地；靜靜感受某種情緒",
     ]
     assert "--write-media" in calls[0]["command"]
     assert calls[0]["check"] is True
@@ -133,9 +178,9 @@ def test_edge_tts_cache_skips_existing_outputs(tmp_path, monkeypatch):
     calls.clear()
     second = synthesize_entries(source, tmp_path, provider="edge", use_cache=True)
 
-    assert len(first.generated) == 4
+    assert len(first.generated) == 8
     assert second.generated == []
-    assert second.skipped == 4
+    assert second.skipped == 8
     assert second.errors == []
     assert calls == []
 
@@ -155,8 +200,8 @@ def test_edge_tts_command_failure_continues_and_skips(tmp_path, monkeypatch):
     result = synthesize_entries(source, tmp_path, provider="edge")
 
     assert result.generated == []
-    assert result.skipped == 4
-    assert len(result.errors) == 4
+    assert result.skipped == 8
+    assert len(result.errors) == 8
     assert all("edge failed" in error for error in result.errors)
 
 
@@ -171,6 +216,6 @@ def test_edge_tts_missing_command_continues_and_skips(tmp_path, monkeypatch):
     result = synthesize_entries(source, tmp_path, provider="edge")
 
     assert result.generated == []
-    assert result.skipped == 4
-    assert len(result.errors) == 4
+    assert result.skipped == 8
+    assert len(result.errors) == 8
     assert all("edge-tts command not found" in error for error in result.errors)

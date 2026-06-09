@@ -83,11 +83,27 @@ The pipeline expects a `source.json` file with `metadata` and `entries`. AI-gene
 
 ## Install as a Codex Skill
 
-After local verification, install the skill into your personal Codex skill directory:
+Install the current project copy as a Codex skill after local verification. Repo-level installs target `.codex/skills/jlpt-study-pipeline`; user-level installs target `$CODEX_HOME/skills/jlpt-study-pipeline` or `~/.codex/skills/jlpt-study-pipeline`.
+
+Preview targets:
 
 ```bash
-mkdir -p "$CODEX_HOME/skills"
-cp -R jlpt-study-pipeline "$CODEX_HOME/skills/jlpt-study-pipeline"
+python3 scripts/skill_install.py --level repo --dry-run
+python3 scripts/skill_install.py --level user --dry-run
 ```
 
-Do this only after reviewing the local project output. If `CODEX_HOME` is unset, use your Codex home directory and keep the final path as `skills/jlpt-study-pipeline`.
+Install or update:
+
+```bash
+python3 scripts/skill_install.py --level repo --force
+python3 scripts/skill_install.py --level user --force
+```
+
+Uninstall:
+
+```bash
+python3 scripts/skill_uninstall.py --level repo --yes --missing-ok
+python3 scripts/skill_uninstall.py --level user --yes --missing-ok
+```
+
+Use `--repo-root`, `--codex-home`, or `--target` for explicit destinations. Generated outputs, virtualenvs, caches, and `.git` are excluded from installs.

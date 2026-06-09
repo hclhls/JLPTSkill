@@ -20,7 +20,7 @@ from jlpt_pipeline.video import (
 )
 
 
-def test_write_narration_skips_rejected_entries(tmp_path):
+def test_write_narration_skips_rejected_entries_and_anki_prompts(tmp_path):
     source = load_source(SAMPLE)
 
     output = write_narration(source, tmp_path)
@@ -29,9 +29,11 @@ def test_write_narration_skips_rejected_entries(tmp_path):
     assert "しみじみ" in text
     assert "ぐずぐず" in text
     assert "ざあざあ" not in text
+    assert "Recall prompt" not in text
+    assert "Answer:" not in text
 
 
-def test_write_subtitles_contains_ass_headers(tmp_path):
+def test_write_subtitles_contains_ass_headers_without_anki_prompts(tmp_path):
     source = load_source(SAMPLE)
 
     output = write_subtitles(source, tmp_path)
@@ -40,6 +42,8 @@ def test_write_subtitles_contains_ass_headers(tmp_path):
     assert "[Script Info]" in text
     assert "[Events]" in text
     assert "しみじみ" in text
+    assert "表示深切感受" not in text
+    assert "Answer" not in text
 
 
 def test_escape_ass_neutralizes_control_sequences_and_braces():
@@ -78,6 +82,63 @@ def test_write_silent_video_uses_escaped_ass_filter(tmp_path, monkeypatch):
     command, kwargs = calls[0]
     vf_arg = command[command.index("-vf") + 1]
     assert vf_arg == ffmpeg_filter_path(out_dir / "subtitles.ass")
+    assert kwargs["check"] is True
+
+
+def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, monkeypatch):
+    source = load_source(SAMPLE)
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
+    audio_paths[0].parent.mkdir()
+    for audio_path in audio_paths:
+        audio_path.write_bytes(b"audio")
+    durations = {audio_path: 1.0 + index for index, audio_path in enumerate(audio_paths)}
+
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
+
+    lines = video.subtitle_lines(source, audio_paths=audio_paths)
+
+    assert [round(line["start"], 1) for line in lines[:8]] == [
+        0.0,
+        1.6,
+        4.2,
+        7.8,
+        12.4,
+        18.0,
+        24.6,
+        32.2,
+    ]
+    assert all(current["end"] <= next_line["start"] for current, next_line in zip(lines, lines[1:]))
+
+
+def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tmp_path, monkeypatch):
+    source = load_source(SAMPLE)
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
+    audio_paths[0].parent.mkdir()
+    for audio_path in audio_paths:
+        audio_path.write_bytes(b"audio")
+    durations = {audio_path: 1.0 + index for index, audio_path in enumerate(audio_paths)}
+    calls = []
+
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
+    monkeypatch.setattr(video.subprocess, "run", capture_run)
+
+    output = video.write_video(source, tmp_path, audio_paths=audio_paths)
+
+    assert output == tmp_path / "video.mp4"
+    command, kwargs = calls[0]
+    filter_complex = command[command.index("-filter_complex") + 1]
+    assert "concat=" not in filter_complex
+    assert "[1:a]adelay=0|0[a1]" in filter_complex
+    assert "[2:a]adelay=1600|1600[a2]" in filter_complex
+    assert "[3:a]adelay=4200|4200[a3]" in filter_complex
+    assert "[8:a]adelay=32200|32200[a8]" in filter_complex
+    assert command[command.index("-i") + 1].endswith("d=40.8")
+    assert command[command.index("-map") + 1] == "0:v"
+    assert command[command.index("-map", command.index("-map") + 1) + 1] == "[aout]"
     assert kwargs["check"] is True
 
 

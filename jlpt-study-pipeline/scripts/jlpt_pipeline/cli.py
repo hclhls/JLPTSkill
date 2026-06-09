@@ -8,7 +8,14 @@ from typing import Sequence
 from .anki import write_anki_csv, write_anki_package
 from .models import ValidationReport
 from .obsidian import write_obsidian_markdown
-from .tts import DEFAULT_PROVIDER, DEFAULT_VOICE, estimate_tts_chars, synthesize_entries
+from .tts import (
+    DEFAULT_PROVIDER,
+    DEFAULT_VOICE,
+    DEFAULT_ZH_TW_VOICE,
+    audio_paths_for_source,
+    estimate_tts_chars,
+    synthesize_entries,
+)
 from .validation import load_source, render_validation_report, validate_source
 from .video import build_video_assets, ffmpeg_available
 
@@ -40,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=["edge", "none"],
     )
     build.add_argument("--voice", default=DEFAULT_VOICE)
+    build.add_argument("--zh-voice", default=DEFAULT_ZH_TW_VOICE)
     build.add_argument("--slug", default="jlpt-study")
     build.add_argument("--video", action="store_true")
     build.add_argument("--max-tts-chars", type=int)
@@ -98,6 +106,18 @@ def _build_command(args: argparse.Namespace) -> int:
     obsidian = write_obsidian_markdown(source, args.out, args.slug)
     anki_csv = write_anki_csv(source, args.out)
     anki_package = write_anki_package(source, args.out, args.deck_name)
+    tts_result = synthesize_entries(
+        source,
+        args.out,
+        provider=args.tts_provider,
+        voice=args.voice,
+        zh_voice=args.zh_voice,
+        max_chars=args.max_tts_chars,
+        use_cache=not args.no_tts_cache,
+    )
+    audio_paths = audio_paths_for_source(
+        source, args.out, voice=args.voice, zh_voice=args.zh_voice
+    )
     video_assets: dict[str, Path | None] = {
         "narration": None,
         "subtitles": None,
@@ -105,17 +125,11 @@ def _build_command(args: argparse.Namespace) -> int:
     }
     video_error = None
     try:
-        video_assets = build_video_assets(source, args.out, make_video=args.video)
+        video_assets = build_video_assets(
+            source, args.out, make_video=args.video, audio_paths=audio_paths
+        )
     except Exception as error:
         video_error = str(error)
-    tts_result = synthesize_entries(
-        source,
-        args.out,
-        provider=args.tts_provider,
-        voice=args.voice,
-        max_chars=args.max_tts_chars,
-        use_cache=not args.no_tts_cache,
-    )
 
     output_lines = [
         f"- Obsidian markdown: {obsidian.name}",
