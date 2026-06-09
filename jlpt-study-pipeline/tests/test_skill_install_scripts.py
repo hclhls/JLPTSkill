@@ -107,3 +107,69 @@ def test_uninstall_missing_ok_returns_target(tmp_path):
     removed = skill_uninstall.uninstall_skill(target, missing_ok=True)
 
     assert removed == target
+
+
+def test_default_targets_repo_tool_options(tmp_path):
+    source = make_source(tmp_path / 'workspace')
+    repo_root = tmp_path / 'workspace'
+    (repo_root / '.codex').mkdir()
+    (repo_root / '.agents').mkdir()
+
+    targets = skill_install.default_targets(source, level='repo', tool='all', repo_root=repo_root)
+    assert set(targets) == {
+        repo_root / '.codex' / 'skills' / 'jlpt-study-pipeline',
+        repo_root / '.agents' / 'skills' / 'jlpt-study-pipeline',
+    }
+
+    targets_codex = skill_install.default_targets(source, level='repo', tool='codex', repo_root=repo_root)
+    assert targets_codex == [repo_root / '.codex' / 'skills' / 'jlpt-study-pipeline']
+
+    targets_agi = skill_install.default_targets(source, level='repo', tool='antigravity', repo_root=repo_root)
+    assert targets_agi == [repo_root / '.agents' / 'skills' / 'jlpt-study-pipeline']
+
+
+def test_default_targets_user_tool_options(tmp_path):
+    source = make_source(tmp_path)
+    codex_home = tmp_path / 'codex-home'
+    gemini_home = tmp_path / 'gemini-home'
+
+    targets = skill_install.default_targets(
+        source,
+        level='user',
+        tool='all',
+        codex_home=codex_home,
+        gemini_home=gemini_home,
+    )
+    assert set(targets) == {
+        codex_home / 'skills' / 'jlpt-study-pipeline',
+        gemini_home / 'skills' / 'jlpt-study-pipeline',
+    }
+
+    targets_codex = skill_install.default_targets(
+        source,
+        level='user',
+        tool='codex',
+        codex_home=codex_home,
+        gemini_home=gemini_home,
+    )
+    assert targets_codex == [codex_home / 'skills' / 'jlpt-study-pipeline']
+
+    targets_agi = skill_install.default_targets(
+        source,
+        level='user',
+        tool='antigravity',
+        codex_home=codex_home,
+        gemini_home=gemini_home,
+    )
+    assert targets_agi == [gemini_home / 'skills' / 'jlpt-study-pipeline']
+
+
+def test_nearest_agents_root(tmp_path):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    (workspace / '.agents').mkdir()
+    nested = workspace / 'foo' / 'bar'
+    nested.mkdir(parents=True)
+
+    assert skill_install.nearest_agents_root(nested) == workspace
+    assert skill_install.nearest_agents_root(tmp_path) is None

@@ -81,9 +81,15 @@ python scripts/jlpt_pipeline.py build \
 
 The pipeline expects a `source.json` file with `metadata` and `entries`. AI-generated entries should use `verification_status: needs_review` until checked against trusted material.
 
-## Install as a Codex Skill
+## Install as an Agent Skill
 
-Install the current project copy as a Codex skill after local verification. Repo-level installs target `.codex/skills/jlpt-study-pipeline`; user-level installs target `$CODEX_HOME/skills/jlpt-study-pipeline` or `~/.codex/skills/jlpt-study-pipeline`.
+Install the current project copy as an agent skill after local verification. It supports both Codex and Antigravity CLI.
+
+Target paths by default (`--tool all`):
+- **Codex**: Repo-level targets `.codex/skills/jlpt-study-pipeline`; user-level targets `$CODEX_HOME/skills/jlpt-study-pipeline` or `~/.codex/skills/jlpt-study-pipeline`.
+- **Antigravity CLI**: Repo-level targets `.agents/skills/jlpt-study-pipeline`; user-level/shared targets `$GEMINI_HOME/skills/jlpt-study-pipeline` or `~/.gemini/skills/jlpt-study-pipeline`.
+
+Use `--tool codex` or `--tool antigravity` to restrict the installation to a single tool.
 
 Preview targets:
 
@@ -106,4 +112,4 @@ python3 scripts/skill_uninstall.py --level repo --yes --missing-ok
 python3 scripts/skill_uninstall.py --level user --yes --missing-ok
 ```
 
-Use `--repo-root`, `--codex-home`, or `--target` for explicit destinations. Generated outputs, virtualenvs, caches, and `.git` are excluded from installs.
+Use `--repo-root`, `--codex-home`, `--gemini-home`, or `--target` for explicit destinations. Generated outputs, virtualenvs, caches, and `.git` are excluded from installs.
