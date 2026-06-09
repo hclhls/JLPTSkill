@@ -1,4 +1,6 @@
 .claude-sandbox/
+.codex/
+.agents/
 
 # Python environments and caches
 .venv/
@@ -19,3 +21,6 @@ out/
 *.mp4
 *.mp3
 *.wav
+
+# Local source material
+sources/
