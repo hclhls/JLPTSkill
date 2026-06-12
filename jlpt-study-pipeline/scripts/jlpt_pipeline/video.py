@@ -14,6 +14,7 @@ AUDIO_GAP_SECONDS = 0.6
 TRAILING_SECONDS = 0.6
 VIDEO_ITEM_FIELDS = [
     ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
+    ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
     ("Body", "zh_tw_meaning", lambda entry: entry["zh_tw_meaning"]),
     ("Body", "example_ja", lambda entry: entry["example_ja"]),
     ("Body", "example_zh_tw", lambda entry: entry["example_zh_tw"]),

@@ -46,7 +46,9 @@ def tts_items(
     items: list[TtsItem] = []
     for entry in active_entries(source):
         entry_id = str(entry["id"])
-        items.append(TtsItem(entry_id, "term", str(entry["term"]), voice))
+        term = str(entry["term"])
+        items.append(TtsItem(entry_id, "term", term, voice))
+        items.append(TtsItem(entry_id, "term", term, voice))
         items.append(
             TtsItem(entry_id, "zh_tw_meaning", str(entry["zh_tw_meaning"]), zh_voice)
         )

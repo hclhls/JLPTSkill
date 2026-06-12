@@ -28,7 +28,8 @@ def test_tts_items_include_japanese_and_zh_tw_video_voice_fields():
 
     items = tts_items(source)
 
-    assert [item.kind for item in items[:4]] == [
+    assert [item.kind for item in items[:5]] == [
+        "term",
         "term",
         "zh_tw_meaning",
         "example_ja",
@@ -47,9 +48,11 @@ def test_tts_items_include_japanese_and_zh_tw_video_voice_fields():
         "voice",
     ]
     assert items[0].voice == DEFAULT_VOICE
-    assert items[1].voice == DEFAULT_ZH_TW_VOICE
-    assert items[2].voice == DEFAULT_VOICE
-    assert items[3].voice == DEFAULT_ZH_TW_VOICE
+    assert items[1].voice == DEFAULT_VOICE
+    assert items[1].text == items[0].text
+    assert items[2].voice == DEFAULT_ZH_TW_VOICE
+    assert items[3].voice == DEFAULT_VOICE
+    assert items[4].voice == DEFAULT_ZH_TW_VOICE
 
 
 def test_estimate_tts_chars_skips_rejected_entries():
@@ -67,7 +70,7 @@ def test_audio_paths_for_source_returns_paths_in_tts_item_order(tmp_path):
 
     paths = audio_paths_for_source(source, tmp_path, voice="ja-JP-NanamiNeural")
 
-    assert [path.parent for path in paths] == [tmp_path / "audio"] * 8
+    assert [path.parent for path in paths] == [tmp_path / "audio"] * 10
     expected_names = [
         hashlib.sha1(f"{item.voice}:{item.text}".encode("utf-8")).hexdigest()
         + ".mp3"
@@ -89,7 +92,7 @@ def test_synthesize_entries_none_provider_creates_audio_and_skips_items(tmp_path
 
     assert (tmp_path / "audio").is_dir()
     assert result.generated == []
-    assert result.skipped == 8
+    assert result.skipped == 10
     assert result.errors == []
     assert list((tmp_path / "audio").iterdir()) == []
 
@@ -139,7 +142,7 @@ def test_edge_tts_success_writes_files_and_uses_expected_command(tmp_path, monke
     result = synthesize_entries(source, tmp_path, provider="edge", voice="ja-JP-NanamiNeural")
 
     assert result.errors == []
-    assert result.skipped == 0
+    assert result.skipped == 2
     assert len(result.generated) == 8
     assert all(path.read_bytes() == b"edge-audio" for path in result.generated)
     assert calls[0]["command"][:5] == [
@@ -180,7 +183,7 @@ def test_edge_tts_cache_skips_existing_outputs(tmp_path, monkeypatch):
 
     assert len(first.generated) == 8
     assert second.generated == []
-    assert second.skipped == 8
+    assert second.skipped == 10
     assert second.errors == []
     assert calls == []
 
@@ -200,8 +203,8 @@ def test_edge_tts_command_failure_continues_and_skips(tmp_path, monkeypatch):
     result = synthesize_entries(source, tmp_path, provider="edge")
 
     assert result.generated == []
-    assert result.skipped == 8
-    assert len(result.errors) == 8
+    assert result.skipped == 10
+    assert len(result.errors) == 10
     assert all("edge failed" in error for error in result.errors)
 
 
@@ -216,6 +219,6 @@ def test_edge_tts_missing_command_continues_and_skips(tmp_path, monkeypatch):
     result = synthesize_entries(source, tmp_path, provider="edge")
 
     assert result.generated == []
-    assert result.skipped == 8
-    assert len(result.errors) == 8
+    assert result.skipped == 10
+    assert len(result.errors) == 10
     assert all("edge-tts command not found" in error for error in result.errors)

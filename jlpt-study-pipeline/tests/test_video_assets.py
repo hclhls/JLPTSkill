@@ -41,6 +41,8 @@ def test_write_subtitles_contains_ass_headers_without_anki_prompts(tmp_path):
 
     assert "[Script Info]" in text
     assert "[Events]" in text
+    assert "Style: Term,Noto Sans CJK JP,128," in text
+    assert "Style: Body,Noto Sans CJK JP,62," in text
     assert "しみじみ" in text
     assert "表示深切感受" not in text
     assert "Answer" not in text
@@ -87,7 +89,7 @@ def test_write_silent_video_uses_escaped_ass_filter(tmp_path, monkeypatch):
 
 def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, monkeypatch):
     source = load_source(SAMPLE)
-    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(10)]
     audio_paths[0].parent.mkdir()
     for audio_path in audio_paths:
         audio_path.write_bytes(b"audio")
@@ -97,7 +99,14 @@ def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, mon
 
     lines = video.subtitle_lines(source, audio_paths=audio_paths)
 
-    assert [round(line["start"], 1) for line in lines[:8]] == [
+    assert [line["text"] for line in lines[:5]] == [
+        "しみじみ (しみじみ)",
+        "しみじみ (しみじみ)",
+        "深切地、由衷地；靜靜感受某種情緒",
+        "卒業式で先生の言葉をしみじみと思い出した。",
+        "在畢業典禮上，我深深想起老師說過的話。",
+    ]
+    assert [round(line["start"], 1) for line in lines[:10]] == [
         0.0,
         1.6,
         4.2,
@@ -106,13 +115,15 @@ def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, mon
         18.0,
         24.6,
         32.2,
+        40.8,
+        50.4,
     ]
     assert all(current["end"] <= next_line["start"] for current, next_line in zip(lines, lines[1:]))
 
 
 def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tmp_path, monkeypatch):
     source = load_source(SAMPLE)
-    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(10)]
     audio_paths[0].parent.mkdir()
     for audio_path in audio_paths:
         audio_path.write_bytes(b"audio")
@@ -136,7 +147,9 @@ def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tm
     assert "[2:a]adelay=1600|1600[a2]" in filter_complex
     assert "[3:a]adelay=4200|4200[a3]" in filter_complex
     assert "[8:a]adelay=32200|32200[a8]" in filter_complex
-    assert command[command.index("-i") + 1].endswith("d=40.8")
+    assert "[9:a]adelay=40800|40800[a9]" in filter_complex
+    assert "[10:a]adelay=50400|50400[a10]" in filter_complex
+    assert command[command.index("-i") + 1].endswith("d=61.0")
     assert command[command.index("-map") + 1] == "0:v"
     assert command[command.index("-map", command.index("-map") + 1) + 1] == "[aout]"
     assert kwargs["check"] is True
