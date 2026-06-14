@@ -42,7 +42,8 @@ def test_write_subtitles_contains_ass_headers_without_anki_prompts(tmp_path):
     assert "[Script Info]" in text
     assert "[Events]" in text
     assert "Style: Term,Noto Sans CJK JP,128," in text
-    assert "Style: Body,Noto Sans CJK JP,62," in text
+    # Body font size bumped to 76
+    assert "Style: Body,Noto Sans CJK JP,76," in text
     assert "しみじみ" in text
     assert "表示深切感受" not in text
     assert "Answer" not in text
@@ -89,7 +90,8 @@ def test_write_silent_video_uses_escaped_ass_filter(tmp_path, monkeypatch):
 
 def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, monkeypatch):
     source = load_source(SAMPLE)
-    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(10)]
+    # New pipeline: 4 audio clips per entry (term1, term2, zh_tw_meaning, example_ja)
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
     audio_paths[0].parent.mkdir()
     for audio_path in audio_paths:
         audio_path.write_bytes(b"audio")
@@ -99,31 +101,27 @@ def test_subtitle_lines_use_actual_audio_durations_without_overlap(tmp_path, mon
 
     lines = video.subtitle_lines(source, audio_paths=audio_paths)
 
-    assert [line["text"] for line in lines[:5]] == [
-        "しみじみ (しみじみ)",
+    # Entry ono-001: clip-0 (dur=1.0) + clip-1 (dur=2.0) merged = 3.0s term frame
+    # then zh_tw_meaning (clip-2, dur=3.0), then example_ja (clip-3, dur=4.0)
+    # Entry ono-002: clip-4+clip-5 merged = 9.0+10.0? No: indices 4..7
+    assert [line["text"] for line in lines[:3]] == [
         "しみじみ (しみじみ)",
         "深切地、由衷地；靜靜感受某種情緒",
-        "卒業式で先生の言葉をしみじみと思い出した。",
-        "在畢業典禮上，我深深想起老師說過的話。",
+        "卒業式で先生の言葉をしみじみと思い出した。\n（在畢業典禮上，我深深想起老師說過的話。）",
     ]
-    assert [round(line["start"], 1) for line in lines[:10]] == [
-        0.0,
-        1.6,
-        4.2,
-        7.8,
-        12.4,
-        18.0,
-        24.6,
-        32.2,
-        40.8,
-        50.4,
-    ]
+    # Term frame: dur=1.0+2.0=3.0 → end=3.0; zh_tw_meaning: start=3.6, dur=3.0 → end=6.6
+    # example_ja: start=7.2, dur=4.0 → end=11.2
+    assert round(lines[0]["start"], 1) == 0.0
+    assert round(lines[0]["end"], 1) == 3.0
+    assert round(lines[1]["start"], 1) == 3.6
+    assert round(lines[2]["start"], 1) == 7.2
     assert all(current["end"] <= next_line["start"] for current, next_line in zip(lines, lines[1:]))
 
 
 def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tmp_path, monkeypatch):
     source = load_source(SAMPLE)
-    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(10)]
+    # New pipeline: 4 clips per entry (term1, term2, zh_tw_meaning, example_ja) × 2 entries = 8
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
     audio_paths[0].parent.mkdir()
     for audio_path in audio_paths:
         audio_path.write_bytes(b"audio")
@@ -140,19 +138,30 @@ def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tm
     output = video.write_video(source, tmp_path, audio_paths=audio_paths)
 
     assert output == tmp_path / "video.mp4"
-    command, kwargs = calls[0]
-    filter_complex = command[command.index("-filter_complex") + 1]
-    assert "concat=" not in filter_complex
-    assert "[1:a]adelay=0|0[a1]" in filter_complex
-    assert "[2:a]adelay=1600|1600[a2]" in filter_complex
-    assert "[3:a]adelay=4200|4200[a3]" in filter_complex
-    assert "[8:a]adelay=32200|32200[a8]" in filter_complex
-    assert "[9:a]adelay=40800|40800[a9]" in filter_complex
-    assert "[10:a]adelay=50400|50400[a10]" in filter_complex
-    assert command[command.index("-i") + 1].endswith("d=61.0")
-    assert command[command.index("-map") + 1] == "0:v"
-    assert command[command.index("-map", command.index("-map") + 1) + 1] == "[aout]"
-    assert kwargs["check"] is True
+    # calls[0] and calls[1] create silence files; calls[2] runs concat demuxer;
+    # calls[3] is the final ffmpeg encode.
+    assert len(calls) == 4
+    # The last call is the final encode with -map 0:v / -map 1:a (no filter_complex)
+    final_cmd, final_kwargs = calls[3]
+    assert "-filter_complex" not in final_cmd
+    assert final_cmd[final_cmd.index("-map") + 1] == "0:v"
+    assert final_cmd[final_cmd.index("-map", final_cmd.index("-map") + 1) + 1] == "1:a"
+    assert final_kwargs["check"] is True
+    # Concat demuxer call (calls[2])
+    concat_cmd, _ = calls[2]
+    assert "-f" in concat_cmd
+    assert "concat" in concat_cmd
+    # The concat.txt file should list clips in order: term1, term2 (no gap), silence,
+    # zh_tw_meaning, silence, example_ja, silence — repeated for entry 2
+    concat_txt = tmp_path / "concat.txt"
+    assert concat_txt.exists()
+    concat_lines = concat_txt.read_text(encoding="utf-8").splitlines()
+    # clip-0 and clip-1 (term1 + term2) appear consecutively without silence between them
+    assert any("clip-0" in line for line in concat_lines)
+    assert any("clip-1" in line for line in concat_lines)
+    term_idx_0 = next(i for i, l in enumerate(concat_lines) if "clip-0" in l)
+    term_idx_1 = next(i for i, l in enumerate(concat_lines) if "clip-1" in l)
+    assert term_idx_1 == term_idx_0 + 1  # directly consecutive, no silence between
 
 
 def test_build_video_assets_without_ffmpeg_still_writes_text_assets(tmp_path, monkeypatch):

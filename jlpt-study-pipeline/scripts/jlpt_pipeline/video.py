@@ -12,12 +12,15 @@ from .models import active_entries
 FALLBACK_ITEM_SECONDS = 2.5
 AUDIO_GAP_SECONDS = 0.6
 TRAILING_SECONDS = 0.6
+# Defines (style, kind, text_fn) for each video segment.
+# "term" appears only once visually but its audio is played twice consecutively.
+# "example_ja" includes the Chinese translation as a bracketed subtitle line.
 VIDEO_ITEM_FIELDS = [
     ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
-    ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
     ("Body", "zh_tw_meaning", lambda entry: entry["zh_tw_meaning"]),
-    ("Body", "example_ja", lambda entry: entry["example_ja"]),
-    ("Body", "example_zh_tw", lambda entry: entry["example_zh_tw"]),
+    ("Body", "example_ja", lambda entry: (
+        f"{entry['example_ja']}\n（{entry['example_zh_tw']}）"
+    )),
 ]
 
 
@@ -102,28 +105,66 @@ def audio_duration_seconds(path: Path) -> float:
 def timeline_items(
     source: dict[str, Any], audio_paths: list[Path] | None = None
 ) -> list[dict[str, Any]]:
+    """Build timeline items from source entries.
+
+    The "term" field is shown as a single unbroken visual segment but its audio
+    plays twice in a row (no silence gap between the two repetitions).
+    The Chinese example translation is shown inline on the same frame as the
+    Japanese example sentence and has no separate audio clip.
+    """
+    # audio_paths order (per entry): term_1, term_2, zh_tw_meaning, example_ja
+    # (example_zh_tw audio is omitted from the pipeline)
     audio_iter = iter(audio_paths or [])
     current = 0.0
     items: list[dict[str, Any]] = []
 
     for entry in active_entries(source):
         for style, kind, text_for_entry in VIDEO_ITEM_FIELDS:
-            audio_path = next(audio_iter, None)
-            duration = FALLBACK_ITEM_SECONDS
-            if audio_path is not None and audio_path.exists():
-                duration = max(audio_duration_seconds(audio_path), 0.1)
-            end = current + duration
-            items.append(
-                {
-                    "start": current,
-                    "end": end,
-                    "style": style,
-                    "kind": kind,
-                    "text": text_for_entry(entry),
-                    "audio_path": audio_path,
-                    "duration": duration,
-                }
-            )
+            if kind == "term":
+                # Consume both term audio clips; combine their durations so
+                # there is no visual gap between the two repetitions.
+                audio1 = next(audio_iter, None)
+                audio2 = next(audio_iter, None)
+                dur1 = FALLBACK_ITEM_SECONDS
+                dur2 = FALLBACK_ITEM_SECONDS
+                if audio1 is not None and audio1.exists():
+                    dur1 = max(audio_duration_seconds(audio1), 0.1)
+                if audio2 is not None and audio2.exists():
+                    dur2 = max(audio_duration_seconds(audio2), 0.1)
+                # Combined duration: both clips back-to-back with no gap
+                duration = dur1 + dur2
+                end = current + duration
+                items.append(
+                    {
+                        "start": current,
+                        "end": end,
+                        "style": style,
+                        "kind": kind,
+                        "text": text_for_entry(entry),
+                        # Store both audio paths for concat
+                        "audio_path": audio1,
+                        "audio_path2": audio2,
+                        "duration": duration,
+                    }
+                )
+            else:
+                audio_path = next(audio_iter, None)
+                duration = FALLBACK_ITEM_SECONDS
+                if audio_path is not None and audio_path.exists():
+                    duration = max(audio_duration_seconds(audio_path), 0.1)
+                end = current + duration
+                items.append(
+                    {
+                        "start": current,
+                        "end": end,
+                        "style": style,
+                        "kind": kind,
+                        "text": text_for_entry(entry),
+                        "audio_path": audio_path,
+                        "audio_path2": None,
+                        "duration": duration,
+                    }
+                )
             current = end + AUDIO_GAP_SECONDS
 
     return items
@@ -175,59 +216,108 @@ def write_video(
         return None
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    usable_audio = [path for path in audio_paths or [] if path.exists()]
-    timed_audio = usable_audio or None
+    timed_audio = audio_paths or None
     subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio)
     output = out_dir / "video.mp4"
     duration = timeline_duration(source, audio_paths=timed_audio)
-    command = [
-        "ffmpeg",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
-    ]
 
-    for path in usable_audio:
-        command.extend(["-i", path.as_posix()])
+    # Check if there are usable audio files
+    usable_audio = [path for path in audio_paths or [] if path.exists()]
 
-    command.extend(["-vf", ffmpeg_filter_path(subtitles)])
     if usable_audio:
-        delayed_streams = []
-        filters = []
-        for audio_index, item in enumerate(timeline_items(source, audio_paths=usable_audio), start=1):
-            if item["audio_path"] is None or not item["audio_path"].exists():
-                continue
-            delay_ms = int(round(item["start"] * 1000))
-            label = f"a{audio_index}"
-            filters.append(f"[{audio_index}:a]adelay={delay_ms}|{delay_ms}[{label}]")
-            delayed_streams.append(f"[{label}]")
-        filters.append(
-            f"{''.join(delayed_streams)}amix=inputs={len(delayed_streams)}:duration=longest:normalize=0[aout]"
-        )
-        command.extend(
-            [
-                "-filter_complex",
-                ";".join(filters),
-                "-map",
-                "0:v",
-                "-map",
-                "[aout]",
-                "-c:a",
-                "aac",
-            ]
+        # Generate silence files matching the edge-tts format (24000Hz mono MP3)
+        silence_06 = out_dir / "audio" / "silence_0.6.mp3"
+        silence_25 = out_dir / "audio" / "silence_2.5.mp3"
+        if not silence_06.exists():
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.6", "-c:a", "libmp3lame", "-b:a", "48k", silence_06.as_posix()],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        if not silence_25.exists():
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "2.5", "-c:a", "libmp3lame", "-b:a", "48k", silence_25.as_posix()],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+        # Create concat.txt
+        concat_txt = out_dir / "concat.txt"
+        lines = []
+        for item in timeline_items(source, audio_paths=timed_audio):
+            if item["kind"] == "term":
+                # Two back-to-back term clips with no silence gap between them
+                ap1 = item.get("audio_path")
+                ap2 = item.get("audio_path2")
+                lines.append(
+                    f"file '{ap1.resolve().as_posix()}'" if ap1 and ap1.exists()
+                    else f"file '{silence_25.resolve().as_posix()}'"
+                )
+                lines.append(
+                    f"file '{ap2.resolve().as_posix()}'" if ap2 and ap2.exists()
+                    else f"file '{silence_25.resolve().as_posix()}'"
+                )
+            else:
+                if item["audio_path"] is not None and item["audio_path"].exists():
+                    lines.append(f"file '{item['audio_path'].resolve().as_posix()}'")
+                else:
+                    lines.append(f"file '{silence_25.resolve().as_posix()}'")
+            lines.append(f"file '{silence_06.resolve().as_posix()}'")
+
+        concat_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # Concatenate audio files using the concat demuxer.
+        # We transcode the audio to WAV (PCM) rather than stream copying (-c copy)
+        # to avoid MP3 encoder delay/padding drift, which causes cumulative desync.
+        narration_combined = out_dir / "narration_combined.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_txt.as_posix(), narration_combined.as_posix()],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
-    command.extend(
-        [
+        command = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
+            "-i",
+            narration_combined.as_posix(),
+            "-vf",
+            ffmpeg_filter_path(subtitles),
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-c:a",
+            "aac",
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
             "-c:v",
             "libx264",
             "-pix_fmt",
             "yuv420p",
             output.as_posix(),
         ]
-    )
+    else:
+        # Fallback to silent video if no audio files are available
+        command = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
+            "-vf",
+            ffmpeg_filter_path(subtitles),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            output.as_posix(),
+        ]
+
     subprocess.run(
         command,
         check=True,
