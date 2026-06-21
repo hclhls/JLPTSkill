@@ -5,6 +5,10 @@ from typing import Any
 
 ALLOWED_JLPT_LEVELS = {"N1", "N2", "N1/N2", "unknown"}
 ALLOWED_VERIFICATION_STATUSES = {"needs_review", "reviewed", "rejected"}
+
+# Example style constants
+EXAMPLE_STYLE_SENTENCE = "sentence"  # full Japanese sentence (example_ja)
+EXAMPLE_STYLE_PHRASE = "phrase"     # short phrase with the vocabulary (example_ja_phrase)
 REQUIRED_ENTRY_FIELDS = {
     "id",
     "term",
@@ -48,3 +52,20 @@ def active_entries(source: dict[str, Any]) -> list[dict[str, Any]]:
         for entry in source.get("entries", [])
         if entry.get("verification_status") != "rejected"
     ]
+
+
+def resolve_example(
+    entry: dict[str, Any],
+    style: str = EXAMPLE_STYLE_SENTENCE,
+) -> str:
+    """Return the appropriate Japanese example text based on *style*.
+
+    ``phrase`` mode uses ``example_ja_phrase`` when available, otherwise
+    falls back to ``example_ja`` so that entries without a phrase field
+    still produce valid output.
+    """
+    if style == EXAMPLE_STYLE_PHRASE:
+        phrase = entry.get("example_ja_phrase")
+        if phrase:
+            return str(phrase)
+    return str(entry.get("example_ja", ""))

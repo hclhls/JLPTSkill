@@ -84,7 +84,7 @@ def test_build_command_writes_core_outputs_without_tts(tmp_path):
 
 
 def test_build_with_edge_tts_failure_warns_and_returns_0(tmp_path, monkeypatch):
-    def fail_edge_tts(source, out_dir, provider="edge", voice="ja-JP-NanamiNeural", zh_voice="zh-TW-HsiaoChenNeural", max_chars=None, use_cache=True):
+    def fail_edge_tts(source, out_dir, provider="edge", voice="ja-JP-NanamiNeural", zh_voice="zh-TW-HsiaoChenNeural", max_chars=None, use_cache=True, **kwargs):
         from jlpt_pipeline.tts import TtsResult
         return TtsResult(errors=["edge tts failed"], skipped=8)
 
@@ -113,7 +113,7 @@ def test_build_with_edge_tts_failure_warns_and_returns_0(tmp_path, monkeypatch):
 
 
 def test_build_video_asset_failure_is_reported_and_returns_0(tmp_path, monkeypatch):
-    def fail_video_assets(source, out_dir, make_video=False, audio_paths=None):
+    def fail_video_assets(source, out_dir, make_video=False, audio_paths=None, **kwargs):
         raise RuntimeError("ffmpeg failed")
 
     monkeypatch.setattr(cli, "build_video_assets", fail_video_assets)

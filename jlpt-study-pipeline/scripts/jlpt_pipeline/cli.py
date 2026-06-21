@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .anki import write_anki_csv, write_anki_package
-from .models import ValidationReport
+from .models import ValidationReport, EXAMPLE_STYLE_SENTENCE
 from .obsidian import write_obsidian_markdown
 from .tts import (
     DEFAULT_PROVIDER,
@@ -32,14 +32,17 @@ def _parser() -> argparse.ArgumentParser:
 
     validate = subcommands.add_parser("validate")
     _add_source_out_args(validate)
+    _add_example_style_arg(validate)
     validate.set_defaults(command=_validate_command)
 
     dry_run = subcommands.add_parser("dry-run")
     _add_source_out_args(dry_run)
+    _add_example_style_arg(dry_run)
     dry_run.set_defaults(command=_dry_run_command)
 
     build = subcommands.add_parser("build")
     _add_source_out_args(build)
+    _add_example_style_arg(build)
     build.add_argument("--deck-name", required=True)
     build.add_argument(
         "--tts-provider",
@@ -62,6 +65,19 @@ def _add_source_out_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out", required=True, type=Path)
 
 
+def _add_example_style_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--example-style",
+        default=EXAMPLE_STYLE_SENTENCE,
+        choices=["sentence", "phrase"],
+        help=(
+            "sentence: use the full Japanese example sentence (default); "
+            "phrase: use the short vocabulary phrase (example_ja_phrase field, "
+            "falls back to example_ja if the phrase field is absent)"
+        ),
+    )
+
+
 def _validate_command(args: argparse.Namespace) -> int:
     source = _load_source_or_write_report(args.source, args.out)
     if source is None:
@@ -82,11 +98,14 @@ def _dry_run_command(args: argparse.Namespace) -> int:
         _write_report(args.out, render_validation_report(report))
         return 1
 
-    estimate = estimate_tts_chars(source)
+    estimate = estimate_tts_chars(source, example_style=args.example_style)
     report_text = _append_sections(
         render_validation_report(report),
         "Dry Run",
-        [f"Estimated TTS characters: {estimate.total_chars}"],
+        [
+            f"Estimated TTS characters: {estimate.total_chars}",
+            f"Example style: {args.example_style}",
+        ],
     )
     _write_report(args.out, report_text)
     return 0 if report.ok else 1
@@ -104,8 +123,8 @@ def _build_command(args: argparse.Namespace) -> int:
         return 1
 
     obsidian = write_obsidian_markdown(source, args.out, args.slug)
-    anki_csv = write_anki_csv(source, args.out)
-    anki_package = write_anki_package(source, args.out, args.deck_name)
+    anki_csv = write_anki_csv(source, args.out, example_style=args.example_style)
+    anki_package = write_anki_package(source, args.out, args.deck_name, example_style=args.example_style)
     tts_result = synthesize_entries(
         source,
         args.out,
@@ -114,9 +133,11 @@ def _build_command(args: argparse.Namespace) -> int:
         zh_voice=args.zh_voice,
         max_chars=args.max_tts_chars,
         use_cache=not args.no_tts_cache,
+        example_style=args.example_style,
     )
     audio_paths = audio_paths_for_source(
-        source, args.out, voice=args.voice, zh_voice=args.zh_voice
+        source, args.out, voice=args.voice, zh_voice=args.zh_voice,
+        example_style=args.example_style,
     )
     video_assets: dict[str, Path | None] = {
         "narration": None,
@@ -126,7 +147,8 @@ def _build_command(args: argparse.Namespace) -> int:
     video_error = None
     try:
         video_assets = build_video_assets(
-            source, args.out, make_video=args.video, audio_paths=audio_paths
+            source, args.out, make_video=args.video, audio_paths=audio_paths,
+            example_style=args.example_style,
         )
     except Exception as error:
         video_error = str(error)
@@ -151,6 +173,7 @@ def _build_command(args: argparse.Namespace) -> int:
     tts_lines = [
         f"TTS status: {tts_status}",
         f"- Provider: {args.tts_provider}",
+        f"- Example style: {args.example_style}",
         f"- Generated: {len(tts_result.generated)}",
         f"- Skipped: {tts_result.skipped}",
     ]

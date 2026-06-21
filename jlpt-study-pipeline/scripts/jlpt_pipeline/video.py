@@ -7,20 +7,38 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from .models import active_entries
+from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
 
 FALLBACK_ITEM_SECONDS = 2.5
 AUDIO_GAP_SECONDS = 0.6
 TRAILING_SECONDS = 0.6
-# Defines (style, kind, text_fn) for each video segment.
-# "term" appears only once visually but its audio is played twice consecutively.
-# "example_ja" includes the Chinese translation as a bracketed subtitle line.
+def get_term_text(entry: dict[str, Any]) -> str:
+    if "term_in" in entry:
+        return f"{entry['term_tr']} ({entry['kana_tr']}) （自動詞：{entry['term_in']} {entry['kana_in']}）"
+    return f"{entry['term']} ({entry['kana']})"
+
+def get_meaning_text(entry: dict[str, Any]) -> str:
+    if "term_in" in entry:
+        return f"{entry['zh_tw_meaning_tr']}（自動詞：{entry['zh_tw_meaning_in']}）"
+    return entry["zh_tw_meaning"]
+
+def get_example_text(entry: dict[str, Any], example_style: str = EXAMPLE_STYLE_SENTENCE) -> str:
+    if "term_in" in entry:
+        return f"他：{entry['example_ja_tr']}\n（{entry['example_zh_tw_tr']}）\n自：{entry['example_ja_in']}\n（{entry['example_zh_tw_in']}）"
+    example_ja = resolve_example(entry, example_style)
+    if "notes" in entry and entry["notes"]:
+        return f"{example_ja}\n（{entry['example_zh_tw']}）\n備註：{entry['notes']}"
+    res = f"{example_ja}\n（{entry['example_zh_tw']}）"
+    if entry.get("note_extra"):
+        res += f"\n【參考資料：{entry['note_extra']}】"
+    elif entry.get("note"):
+        res += f"\n【參考資料：{entry['note']}】"
+    return res
+
 VIDEO_ITEM_FIELDS = [
-    ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
-    ("Body", "zh_tw_meaning", lambda entry: entry["zh_tw_meaning"]),
-    ("Body", "example_ja", lambda entry: (
-        f"{entry['example_ja']}\n（{entry['example_zh_tw']}）"
-    )),
+    ("Term", "term", get_term_text),
+    ("Body", "zh_tw_meaning", get_meaning_text),
+    ("Body", "example_ja", get_example_text),
 ]
 
 
@@ -62,18 +80,21 @@ def ffmpeg_filter_path(path: Path) -> str:
     return f"ass=filename='{escaped}'"
 
 
-def write_narration(source: dict[str, Any], out_dir: Path) -> Path:
+def write_narration(
+    source: dict[str, Any], out_dir: Path, example_style: str = EXAMPLE_STYLE_SENTENCE
+) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "narration.txt"
     blocks: list[str] = []
 
     for entry in active_entries(source):
+        example_text = resolve_example(entry, example_style)
         blocks.append(
             "\n".join(
                 [
                     f"{entry['id']} {entry['term']} ({entry['kana']})",
                     f"Meaning: {entry['zh_tw_meaning']}",
-                    f"Example JA: {entry['example_ja']}",
+                    f"Example JA: {example_text}",
                     f"Example ZH: {entry['example_zh_tw']}",
                 ]
             )
@@ -103,7 +124,9 @@ def audio_duration_seconds(path: Path) -> float:
 
 
 def timeline_items(
-    source: dict[str, Any], audio_paths: list[Path] | None = None
+    source: dict[str, Any],
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
 ) -> list[dict[str, Any]]:
     """Build timeline items from source entries.
 
@@ -112,6 +135,14 @@ def timeline_items(
     The Chinese example translation is shown inline on the same frame as the
     Japanese example sentence and has no separate audio clip.
     """
+    # Build a per-entry VIDEO_ITEM_FIELDS that uses the resolved example style
+    def _fields_for_entry(entry: dict[str, Any]):
+        return [
+            ("Term", "term", get_term_text),
+            ("Body", "zh_tw_meaning", get_meaning_text),
+            ("Body", "example_ja", lambda e: get_example_text(e, example_style)),
+        ]
+
     # audio_paths order (per entry): term_1, term_2, zh_tw_meaning, example_ja
     # (example_zh_tw audio is omitted from the pipeline)
     audio_iter = iter(audio_paths or [])
@@ -119,7 +150,7 @@ def timeline_items(
     items: list[dict[str, Any]] = []
 
     for entry in active_entries(source):
-        for style, kind, text_for_entry in VIDEO_ITEM_FIELDS:
+        for style, kind, text_for_entry in _fields_for_entry(entry):
             if kind == "term":
                 # Consume both term audio clips; combine their durations so
                 # there is no visual gap between the two repetitions.
@@ -170,15 +201,21 @@ def timeline_items(
     return items
 
 
-def timeline_duration(source: dict[str, Any], audio_paths: list[Path] | None = None) -> float:
-    items = timeline_items(source, audio_paths=audio_paths)
+def timeline_duration(
+    source: dict[str, Any],
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
+) -> float:
+    items = timeline_items(source, audio_paths=audio_paths, example_style=example_style)
     if not items:
         return FALLBACK_ITEM_SECONDS + TRAILING_SECONDS
     return items[-1]["end"] + TRAILING_SECONDS
 
 
 def subtitle_lines(
-    source: dict[str, Any], audio_paths: list[Path] | None = None
+    source: dict[str, Any],
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -187,19 +224,25 @@ def subtitle_lines(
             "style": item["style"],
             "text": item["text"],
         }
-        for item in timeline_items(source, audio_paths=audio_paths)
+        for item in timeline_items(source, audio_paths=audio_paths, example_style=example_style)
     ]
 
 
 def write_subtitles(
-    source: dict[str, Any], out_dir: Path, audio_paths: list[Path] | None = None
+    source: dict[str, Any],
+    out_dir: Path,
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "subtitles.ass"
     template = _template_env().get_template("video_scene.ass.j2")
     title = source.get("metadata", {}).get("topic") or "JLPT Study"
     output.write_text(
-        template.render(title=title, lines=subtitle_lines(source, audio_paths=audio_paths)),
+        template.render(
+            title=title,
+            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style),
+        ),
         encoding="utf-8",
     )
     return output
@@ -210,16 +253,19 @@ def ffmpeg_available() -> bool:
 
 
 def write_video(
-    source: dict[str, Any], out_dir: Path, audio_paths: list[Path] | None = None
+    source: dict[str, Any],
+    out_dir: Path,
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
 ) -> Path | None:
     if not ffmpeg_available():
         return None
 
     out_dir.mkdir(parents=True, exist_ok=True)
     timed_audio = audio_paths or None
-    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio)
+    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style)
     output = out_dir / "video.mp4"
-    duration = timeline_duration(source, audio_paths=timed_audio)
+    duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style)
 
     # Check if there are usable audio files
     usable_audio = [path for path in audio_paths or [] if path.exists()]
@@ -327,8 +373,12 @@ def write_video(
     return output
 
 
-def write_silent_video(source: dict[str, Any], out_dir: Path) -> Path | None:
-    return write_video(source, out_dir, audio_paths=None)
+def write_silent_video(
+    source: dict[str, Any],
+    out_dir: Path,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
+) -> Path | None:
+    return write_video(source, out_dir, audio_paths=None, example_style=example_style)
 
 
 def build_video_assets(
@@ -336,8 +386,9 @@ def build_video_assets(
     out_dir: Path,
     make_video: bool = False,
     audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
 ) -> dict[str, Path | None]:
-    narration = write_narration(source, out_dir)
-    subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths)
-    video = write_video(source, out_dir, audio_paths=audio_paths) if make_video else None
+    narration = write_narration(source, out_dir, example_style=example_style)
+    subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths, example_style=example_style)
+    video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style) if make_video else None
     return {"narration": narration, "subtitles": subtitles, "video": video}

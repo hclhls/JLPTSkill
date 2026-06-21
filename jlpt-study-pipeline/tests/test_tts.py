@@ -222,3 +222,25 @@ def test_edge_tts_missing_command_continues_and_skips(tmp_path, monkeypatch):
     assert result.skipped == 8
     assert len(result.errors) == 6
     assert all("edge-tts command not found" in error for error in result.errors)
+
+
+def test_tts_uses_kana_instead_of_kanji_term():
+    source = {
+        "metadata": {"topic": "test", "verification_policy": "reviewed"},
+        "entries": [
+            {
+                "id": "test-001",
+                "term": "施錠",
+                "kana": "せじょう",
+                "zh_tw_meaning": "上鎖",
+                "example_ja": "施錠してください",
+                "verification_status": "reviewed",
+            }
+        ]
+    }
+    items = tts_items(source)
+    # The term items should use the pronunciation (kana) "せじょう" instead of the kanji "施錠"
+    assert items[0].text == "せじょう"
+    assert items[1].text == "せじょう"
+    # example_ja remains intact
+    assert items[3].text == "施錠してください"

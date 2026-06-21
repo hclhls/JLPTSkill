@@ -28,7 +28,8 @@ Each entry must include:
 - `jlpt_level_estimate`
 - `category`
 - `zh_tw_meaning`
-- `example_ja`
+- `example_ja` — complete Japanese sentence using the vocabulary
+- `example_ja_phrase` *(optional)* — short phrase or collocation containing the vocabulary word, without forming a full sentence. Include this when a concise phrase is more useful for quick recall than a full sentence.
 - `example_zh_tw`
 - `recall_prompt_zh_tw`
 - `verification_status`
@@ -48,8 +49,11 @@ python scripts/jlpt_pipeline.py build \
   --deck-name "JLPT Study" \
   --tts-provider edge \
   --voice ja-JP-NanamiNeural \
+  --example-style sentence \
   --video
 ```
+
+Use `--example-style phrase` to use the short `example_ja_phrase` field instead of the full sentence for TTS audio, video subtitles, and Anki card backs. If an entry has no `example_ja_phrase`, it falls back to `example_ja` automatically. **Always ask the user which style they prefer** before running the pipeline.
 
 The pipeline exports Obsidian Markdown, Anki `.apkg`, `anki.csv`, `narration.txt`, `subtitles.ass`, optional edge-tts audio, optional `video.mp4`, and `validation_report.md`.
 
