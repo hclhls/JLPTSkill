@@ -127,11 +127,12 @@ def timeline_items(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> list[dict[str, Any]]:
     """Build timeline items from source entries.
 
     The "term" field is shown as a single unbroken visual segment but its audio
-    plays twice in a row (no silence gap between the two repetitions).
+    plays `word_repetition` times in a row (no silence gap between the repetitions).
     The Chinese example translation is shown inline on the same frame as the
     Japanese example sentence and has no separate audio clip.
     """
@@ -143,7 +144,7 @@ def timeline_items(
             ("Body", "example_ja", lambda e: get_example_text(e, example_style)),
         ]
 
-    # audio_paths order (per entry): term_1, term_2, zh_tw_meaning, example_ja
+    # audio_paths order (per entry): term_1, ..., term_N, zh_tw_meaning, example_ja
     # (example_zh_tw audio is omitted from the pipeline)
     audio_iter = iter(audio_paths or [])
     current = 0.0
@@ -152,18 +153,23 @@ def timeline_items(
     for entry in active_entries(source):
         for style, kind, text_for_entry in _fields_for_entry(entry):
             if kind == "term":
-                # Consume both term audio clips; combine their durations so
-                # there is no visual gap between the two repetitions.
-                audio1 = next(audio_iter, None)
-                audio2 = next(audio_iter, None)
-                dur1 = FALLBACK_ITEM_SECONDS
-                dur2 = FALLBACK_ITEM_SECONDS
-                if audio1 is not None and audio1.exists():
-                    dur1 = max(audio_duration_seconds(audio1), 0.1)
-                if audio2 is not None and audio2.exists():
-                    dur2 = max(audio_duration_seconds(audio2), 0.1)
-                # Combined duration: both clips back-to-back with no gap
-                duration = dur1 + dur2
+                # Consume all term audio clips; combine their durations so
+                # there is no visual gap between the repetitions.
+                term_audios = []
+                for _ in range(word_repetition):
+                    term_audios.append(next(audio_iter, None))
+
+                duration = 0.0
+                if audio_paths is None:
+                    # Silent video fallback or when no audio paths are provided at all
+                    duration = max(word_repetition, 1) * FALLBACK_ITEM_SECONDS
+                else:
+                    for audio in term_audios:
+                        dur = FALLBACK_ITEM_SECONDS
+                        if audio is not None and audio.exists():
+                            dur = max(audio_duration_seconds(audio), 0.1)
+                        duration += dur
+
                 end = current + duration
                 items.append(
                     {
@@ -172,9 +178,10 @@ def timeline_items(
                         "style": style,
                         "kind": kind,
                         "text": text_for_entry(entry),
-                        # Store both audio paths for concat
-                        "audio_path": audio1,
-                        "audio_path2": audio2,
+                        # Store all audio paths for concat
+                        "audio_paths": term_audios,
+                        "audio_path": term_audios[0] if len(term_audios) > 0 else None,
+                        "audio_path2": term_audios[1] if len(term_audios) > 1 else None,
                         "duration": duration,
                     }
                 )
@@ -191,6 +198,7 @@ def timeline_items(
                         "style": style,
                         "kind": kind,
                         "text": text_for_entry(entry),
+                        "audio_paths": [audio_path] if audio_path is not None else [],
                         "audio_path": audio_path,
                         "audio_path2": None,
                         "duration": duration,
@@ -205,8 +213,9 @@ def timeline_duration(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> float:
-    items = timeline_items(source, audio_paths=audio_paths, example_style=example_style)
+    items = timeline_items(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
     if not items:
         return FALLBACK_ITEM_SECONDS + TRAILING_SECONDS
     return items[-1]["end"] + TRAILING_SECONDS
@@ -216,6 +225,7 @@ def subtitle_lines(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -224,7 +234,7 @@ def subtitle_lines(
             "style": item["style"],
             "text": item["text"],
         }
-        for item in timeline_items(source, audio_paths=audio_paths, example_style=example_style)
+        for item in timeline_items(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
     ]
 
 
@@ -233,6 +243,7 @@ def write_subtitles(
     out_dir: Path,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "subtitles.ass"
@@ -241,7 +252,7 @@ def write_subtitles(
     output.write_text(
         template.render(
             title=title,
-            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style),
+            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition),
         ),
         encoding="utf-8",
     )
@@ -257,15 +268,16 @@ def write_video(
     out_dir: Path,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> Path | None:
     if not ffmpeg_available():
         return None
 
     out_dir.mkdir(parents=True, exist_ok=True)
     timed_audio = audio_paths or None
-    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style)
+    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition)
     output = out_dir / "video.mp4"
-    duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style)
+    duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition)
 
     # Check if there are usable audio files
     usable_audio = [path for path in audio_paths or [] if path.exists()]
@@ -288,24 +300,15 @@ def write_video(
         # Create concat.txt
         concat_txt = out_dir / "concat.txt"
         lines = []
-        for item in timeline_items(source, audio_paths=timed_audio):
-            if item["kind"] == "term":
-                # Two back-to-back term clips with no silence gap between them
-                ap1 = item.get("audio_path")
-                ap2 = item.get("audio_path2")
-                lines.append(
-                    f"file '{ap1.resolve().as_posix()}'" if ap1 and ap1.exists()
-                    else f"file '{silence_25.resolve().as_posix()}'"
-                )
-                lines.append(
-                    f"file '{ap2.resolve().as_posix()}'" if ap2 and ap2.exists()
-                    else f"file '{silence_25.resolve().as_posix()}'"
-                )
+        for item in timeline_items(source, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition):
+            if item["audio_paths"]:
+                for ap in item["audio_paths"]:
+                    if ap is not None and ap.exists():
+                        lines.append(f"file '{ap.resolve().as_posix()}'")
+                    else:
+                        lines.append(f"file '{silence_25.resolve().as_posix()}'")
             else:
-                if item["audio_path"] is not None and item["audio_path"].exists():
-                    lines.append(f"file '{item['audio_path'].resolve().as_posix()}'")
-                else:
-                    lines.append(f"file '{silence_25.resolve().as_posix()}'")
+                lines.append(f"file '{silence_25.resolve().as_posix()}'")
             lines.append(f"file '{silence_06.resolve().as_posix()}'")
 
         concat_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -377,8 +380,9 @@ def write_silent_video(
     source: dict[str, Any],
     out_dir: Path,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> Path | None:
-    return write_video(source, out_dir, audio_paths=None, example_style=example_style)
+    return write_video(source, out_dir, audio_paths=None, example_style=example_style, word_repetition=word_repetition)
 
 
 def build_video_assets(
@@ -387,8 +391,9 @@ def build_video_assets(
     make_video: bool = False,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> dict[str, Path | None]:
     narration = write_narration(source, out_dir, example_style=example_style)
-    subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths, example_style=example_style)
-    video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style) if make_video else None
+    subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+    video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition) if make_video else None
     return {"narration": narration, "subtitles": subtitles, "video": video}

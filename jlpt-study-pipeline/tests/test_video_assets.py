@@ -174,3 +174,44 @@ def test_build_video_assets_without_ffmpeg_still_writes_text_assets(tmp_path, mo
     assert assets["subtitles"].exists()
     assert assets["video"] is None
     assert not ffmpeg_available()
+
+
+def test_video_assets_with_custom_repetition(tmp_path, monkeypatch):
+    source = load_source(SAMPLE)
+    # With 3 repetitions: 2 entries × (3 term + 1 meaning + 1 example) = 10 clips
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(10)]
+    audio_paths[0].parent.mkdir()
+    for audio_path in audio_paths:
+        audio_path.write_bytes(b"audio")
+    durations = {audio_path: 1.0 for audio_path in audio_paths}
+
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
+
+    # Check timeline_items
+    items = video.timeline_items(source, audio_paths=audio_paths, word_repetition=3)
+    # Entry 1 term should combine clip-0, clip-1, clip-2 (each dur=1.0) -> duration=3.0
+    assert items[0]["duration"] == 3.0
+    assert len(items[0]["audio_paths"]) == 3
+    assert items[0]["audio_paths"] == audio_paths[0:3]
+
+    # Verify concat call writes 3 consecutive files
+    calls = []
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(video.subprocess, "run", capture_run)
+
+    output = video.write_video(source, tmp_path, audio_paths=audio_paths, word_repetition=3)
+    assert output == tmp_path / "video.mp4"
+
+    concat_txt = tmp_path / "concat.txt"
+    assert concat_txt.exists()
+    concat_lines = concat_txt.read_text(encoding="utf-8").splitlines()
+
+    # Verify that clip-0, clip-1, clip-2 appear directly after each other
+    idx0 = next(i for i, l in enumerate(concat_lines) if "clip-0" in l)
+    idx1 = next(i for i, l in enumerate(concat_lines) if "clip-1" in l)
+    idx2 = next(i for i, l in enumerate(concat_lines) if "clip-2" in l)
+    assert idx1 == idx0 + 1
+    assert idx2 == idx1 + 1

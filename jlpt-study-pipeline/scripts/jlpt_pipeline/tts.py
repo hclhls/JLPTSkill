@@ -43,14 +43,14 @@ def tts_items(
     voice: str = DEFAULT_VOICE,
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> list[TtsItem]:
     """Return TTS items for the pipeline.
 
     Order per entry:
-      1. term (Japanese, spoken twice)
-      2. term (Japanese, second repetition)
-      3. zh_tw_meaning (Chinese)
-      4. example_ja / example_ja_phrase depending on *example_style*
+      1. term (Japanese, spoken `word_repetition` times)
+      2. zh_tw_meaning (Chinese)
+      3. example_ja / example_ja_phrase depending on *example_style*
 
     ``example_zh_tw`` is intentionally omitted: the Chinese translation is
     shown as a bracketed subtitle on the same frame as the Japanese example
@@ -61,8 +61,8 @@ def tts_items(
         entry_id = str(entry["id"])
         # Use kana for TTS pronunciation of the term to avoid incorrect Kanji pronunciation
         term_tts_text = str(entry.get("kana") or entry["term"])
-        items.append(TtsItem(entry_id, "term", term_tts_text, voice))
-        items.append(TtsItem(entry_id, "term", term_tts_text, voice))
+        for _ in range(word_repetition):
+            items.append(TtsItem(entry_id, "term", term_tts_text, voice))
         items.append(
             TtsItem(entry_id, "zh_tw_meaning", str(entry["zh_tw_meaning"]), zh_voice)
         )
@@ -70,8 +70,12 @@ def tts_items(
     return items
 
 
-def estimate_tts_chars(source: dict[str, Any], example_style: str = EXAMPLE_STYLE_SENTENCE) -> TtsEstimate:
-    items = tts_items(source, example_style=example_style)
+def estimate_tts_chars(
+    source: dict[str, Any],
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
+) -> TtsEstimate:
+    items = tts_items(source, example_style=example_style, word_repetition=word_repetition)
     return TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
 
 
@@ -81,9 +85,10 @@ def audio_paths_for_source(
     voice: str = DEFAULT_VOICE,
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> list[Path]:
     audio_dir = out_dir / "audio"
-    return [_cache_path(audio_dir, item) for item in tts_items(source, voice, zh_voice, example_style)]
+    return [_cache_path(audio_dir, item) for item in tts_items(source, voice, zh_voice, example_style, word_repetition)]
 
 
 def synthesize_entries(
@@ -95,10 +100,11 @@ def synthesize_entries(
     max_chars: int | None = None,
     use_cache: bool = True,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
 ) -> TtsResult:
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    items = tts_items(source, voice, zh_voice, example_style)
+    items = tts_items(source, voice, zh_voice, example_style, word_repetition)
     estimate = TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
     result = TtsResult()
 

@@ -33,16 +33,19 @@ def _parser() -> argparse.ArgumentParser:
     validate = subcommands.add_parser("validate")
     _add_source_out_args(validate)
     _add_example_style_arg(validate)
+    _add_word_repetition_arg(validate)
     validate.set_defaults(command=_validate_command)
 
     dry_run = subcommands.add_parser("dry-run")
     _add_source_out_args(dry_run)
     _add_example_style_arg(dry_run)
+    _add_word_repetition_arg(dry_run)
     dry_run.set_defaults(command=_dry_run_command)
 
     build = subcommands.add_parser("build")
     _add_source_out_args(build)
     _add_example_style_arg(build)
+    _add_word_repetition_arg(build)
     build.add_argument("--deck-name", required=True)
     build.add_argument(
         "--tts-provider",
@@ -78,6 +81,15 @@ def _add_example_style_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_word_repetition_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--word-repetition",
+        default=2,
+        type=int,
+        help="Number of times the Japanese vocabulary is read out (default: 2)",
+    )
+
+
 def _validate_command(args: argparse.Namespace) -> int:
     source = _load_source_or_write_report(args.source, args.out)
     if source is None:
@@ -98,13 +110,14 @@ def _dry_run_command(args: argparse.Namespace) -> int:
         _write_report(args.out, render_validation_report(report))
         return 1
 
-    estimate = estimate_tts_chars(source, example_style=args.example_style)
+    estimate = estimate_tts_chars(source, example_style=args.example_style, word_repetition=args.word_repetition)
     report_text = _append_sections(
         render_validation_report(report),
         "Dry Run",
         [
             f"Estimated TTS characters: {estimate.total_chars}",
             f"Example style: {args.example_style}",
+            f"Word repetition count: {args.word_repetition}",
         ],
     )
     _write_report(args.out, report_text)
@@ -134,10 +147,12 @@ def _build_command(args: argparse.Namespace) -> int:
         max_chars=args.max_tts_chars,
         use_cache=not args.no_tts_cache,
         example_style=args.example_style,
+        word_repetition=args.word_repetition,
     )
     audio_paths = audio_paths_for_source(
         source, args.out, voice=args.voice, zh_voice=args.zh_voice,
         example_style=args.example_style,
+        word_repetition=args.word_repetition,
     )
     video_assets: dict[str, Path | None] = {
         "narration": None,
@@ -149,6 +164,7 @@ def _build_command(args: argparse.Namespace) -> int:
         video_assets = build_video_assets(
             source, args.out, make_video=args.video, audio_paths=audio_paths,
             example_style=args.example_style,
+            word_repetition=args.word_repetition,
         )
     except Exception as error:
         video_error = str(error)
@@ -174,6 +190,7 @@ def _build_command(args: argparse.Namespace) -> int:
         f"TTS status: {tts_status}",
         f"- Provider: {args.tts_provider}",
         f"- Example style: {args.example_style}",
+        f"- Word repetition count: {args.word_repetition}",
         f"- Generated: {len(tts_result.generated)}",
         f"- Skipped: {tts_result.skipped}",
     ]
