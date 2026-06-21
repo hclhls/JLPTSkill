@@ -138,3 +138,40 @@ def test_build_video_asset_failure_is_reported_and_returns_0(tmp_path, monkeypat
     assert result == 0
     report_text = (tmp_path / "validation_report.md").read_text(encoding="utf-8")
     assert "ffmpeg failed" in report_text
+
+
+def test_build_command_passes_words_per_short_to_video_assets(tmp_path, monkeypatch):
+    captured = {}
+
+    def capture_video_assets(source, out_dir, make_video=False, audio_paths=None, **kwargs):
+        captured["make_video"] = make_video
+        captured["words_per_short"] = kwargs.get("words_per_short")
+        return {"narration": out_dir / "narration.txt", "subtitles": out_dir / "subtitles.ass", "video": None, "videos": [out_dir / "shorts" / "short_001" / "video.mp4"]}
+
+    monkeypatch.setattr(cli, "build_video_assets", capture_video_assets)
+    monkeypatch.setattr(cli, "ffmpeg_available", lambda: True)
+
+    result = main(
+        [
+            "build",
+            "--source",
+            str(SAMPLE),
+            "--out",
+            str(tmp_path),
+            "--deck-name",
+            "Sample JLPT",
+            "--tts-provider",
+            "none",
+            "--slug",
+            "sample",
+            "--video",
+            "--video-words-per-short",
+            "1",
+        ]
+    )
+
+    assert result == 0
+    assert captured == {"make_video": True, "words_per_short": 1}
+    report_text = (tmp_path / "validation_report.md").read_text(encoding="utf-8")
+    assert "Short video: shorts/short_001/video.mp4" in report_text
+    assert "Video words per short: 1" in report_text

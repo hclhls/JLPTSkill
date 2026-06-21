@@ -83,6 +83,20 @@ python scripts/jlpt_pipeline.py build \
   --video
 ```
 
+Build YouTube short-style segmented videos instead of one long video by adding `--video-words-per-short`. For example, this creates one MP4 per 3 active vocabulary entries under `out/sample/shorts/short_001/video.mp4`, `short_002/video.mp4`, and so on:
+
+```bash
+python scripts/jlpt_pipeline.py build \
+  --source examples/source.sample.json \
+  --out out/sample \
+  --deck-name "Sample JLPT" \
+  --tts-provider edge \
+  --voice ja-JP-NanamiNeural \
+  --slug sample \
+  --video \
+  --video-words-per-short 3
+```
+
 Build without TTS:
 
 ```bash
@@ -114,7 +128,7 @@ python scripts/build_youtube_jlpt.py \
   --video
 ```
 
-The helper creates `out/<video_id>/transcript_raw.txt` by default. If `out/<video_id>/source.json` does not exist yet, it prints a prompt for generating that source file and exits. Run the helper again after creating `source.json`.
+The helper creates `out/<video_id>/transcript_raw.txt` by default. If `out/<video_id>/source.json` does not exist yet, it prints a prompt for generating that source file and exits. Run the helper again after creating `source.json`. When `--video` is used in an interactive terminal, the helper asks whether to keep one long video or enter a vocabulary count for segmented short videos. For non-interactive use, pass `--video-words-per-short N` explicitly.
 
 ## Outputs
 
@@ -126,7 +140,7 @@ A successful build can create:
 - `narration.txt`.
 - `subtitles.ass`.
 - `audio/` when TTS succeeds.
-- `video.mp4` when `ffmpeg` is available and succeeds.
+- `video.mp4` when `ffmpeg` is available and succeeds, or `shorts/short_*/video.mp4` when `--video-words-per-short` is used.
 - `validation_report.md`.
 
 Generated files are written under the selected `--out` directory and are ignored by Git.

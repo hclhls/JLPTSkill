@@ -12,6 +12,8 @@ from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
 FALLBACK_ITEM_SECONDS = 2.5
 AUDIO_GAP_SECONDS = 0.6
 TRAILING_SECONDS = 0.6
+
+
 def get_term_text(entry: dict[str, Any]) -> str:
     if "term_in" in entry:
         return f"{entry['term_tr']} ({entry['kana_tr']}) （自動詞：{entry['term_in']} {entry['kana_in']}）"
@@ -263,6 +265,21 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+def _entry_audio_count(word_repetition: int) -> int:
+    return max(word_repetition, 1) + 2
+
+
+def _chunked(items: list[Any], chunk_size: int) -> list[list[Any]]:
+    return [items[index : index + chunk_size] for index in range(0, len(items), chunk_size)]
+
+
+def _source_for_entries(source: dict[str, Any], entries: list[dict[str, Any]], part_index: int, part_count: int) -> dict[str, Any]:
+    metadata = dict(source.get("metadata", {}))
+    title = metadata.get("topic") or "JLPT Study"
+    metadata["topic"] = f"{title} {part_index}/{part_count}"
+    return {**source, "metadata": metadata, "entries": entries}
+
+
 def write_video(
     source: dict[str, Any],
     out_dir: Path,
@@ -286,6 +303,7 @@ def write_video(
         # Generate silence files matching the edge-tts format (24000Hz mono MP3)
         silence_06 = out_dir / "audio" / "silence_0.6.mp3"
         silence_25 = out_dir / "audio" / "silence_2.5.mp3"
+        silence_06.parent.mkdir(parents=True, exist_ok=True)
         if not silence_06.exists():
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "0.6", "-c:a", "libmp3lame", "-b:a", "48k", silence_06.as_posix()],
@@ -392,8 +410,63 @@ def build_video_assets(
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
+    words_per_short: int | None = None,
 ) -> dict[str, Path | None]:
     narration = write_narration(source, out_dir, example_style=example_style)
     subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
-    video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition) if make_video else None
-    return {"narration": narration, "subtitles": subtitles, "video": video}
+    video = None
+    videos: list[Path] = []
+
+    if make_video and words_per_short is not None:
+        videos = write_short_videos(
+            source,
+            out_dir,
+            words_per_short=words_per_short,
+            audio_paths=audio_paths,
+            example_style=example_style,
+            word_repetition=word_repetition,
+        )
+    elif make_video:
+        video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+
+    return {"narration": narration, "subtitles": subtitles, "video": video, "videos": videos}
+
+
+def write_short_videos(
+    source: dict[str, Any],
+    out_dir: Path,
+    words_per_short: int,
+    audio_paths: list[Path] | None = None,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
+    word_repetition: int = 2,
+) -> list[Path]:
+    if words_per_short < 1:
+        raise ValueError("words_per_short must be at least 1")
+
+    entries = active_entries(source)
+    if not entries:
+        return []
+
+    entry_chunks = _chunked(entries, words_per_short)
+    if audio_paths is None:
+        audio_chunks: list[list[Path] | None] = [None for _ in entry_chunks]
+    else:
+        clips_per_entry = _entry_audio_count(word_repetition)
+        audio_chunks = _chunked(audio_paths, words_per_short * clips_per_entry)
+
+    videos: list[Path] = []
+    part_count = len(entry_chunks)
+    for index, entries_chunk in enumerate(entry_chunks, start=1):
+        short_dir = out_dir / "shorts" / f"short_{index:03d}"
+        short_source = _source_for_entries(source, entries_chunk, index, part_count)
+        chunk_audio = audio_chunks[index - 1] if index - 1 < len(audio_chunks) else None
+        video = write_video(
+            short_source,
+            short_dir,
+            audio_paths=chunk_audio,
+            example_style=example_style,
+            word_repetition=word_repetition,
+        )
+        if video is not None:
+            videos.append(video)
+    return videos

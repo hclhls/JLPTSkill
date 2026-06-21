@@ -15,6 +15,7 @@ from jlpt_pipeline.video import (
     ffmpeg_available,
     ffmpeg_filter_path,
     write_narration,
+    write_short_videos,
     write_silent_video,
     write_subtitles,
 )
@@ -215,3 +216,51 @@ def test_video_assets_with_custom_repetition(tmp_path, monkeypatch):
     idx2 = next(i for i, l in enumerate(concat_lines) if "clip-2" in l)
     assert idx1 == idx0 + 1
     assert idx2 == idx1 + 1
+
+
+def test_write_short_videos_splits_entries_and_audio_by_word_count(tmp_path, monkeypatch):
+    source = load_source(SAMPLE)
+    audio_paths = [tmp_path / "audio" / f"clip-{index}.mp3" for index in range(8)]
+    audio_paths[0].parent.mkdir()
+    for audio_path in audio_paths:
+        audio_path.write_bytes(b"audio")
+    durations = {audio_path: 1.0 for audio_path in audio_paths}
+    calls = []
+
+    def capture_run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
+    monkeypatch.setattr(video.subprocess, "run", capture_run)
+
+    outputs = write_short_videos(source, tmp_path, words_per_short=1, audio_paths=audio_paths)
+
+    assert outputs == [
+        tmp_path / "shorts" / "short_001" / "video.mp4",
+        tmp_path / "shorts" / "short_002" / "video.mp4",
+    ]
+    first_subtitles = (tmp_path / "shorts" / "short_001" / "subtitles.ass").read_text(encoding="utf-8")
+    second_subtitles = (tmp_path / "shorts" / "short_002" / "subtitles.ass").read_text(encoding="utf-8")
+    assert "しみじみ" in first_subtitles
+    assert "ぐずぐず" not in first_subtitles
+    assert "ぐずぐず" in second_subtitles
+
+    first_concat = (tmp_path / "shorts" / "short_001" / "concat.txt").read_text(encoding="utf-8")
+    second_concat = (tmp_path / "shorts" / "short_002" / "concat.txt").read_text(encoding="utf-8")
+    assert "clip-0" in first_concat
+    assert "clip-3" in first_concat
+    assert "clip-4" not in first_concat
+    assert "clip-4" in second_concat
+    assert "clip-7" in second_concat
+
+
+def test_write_short_videos_rejects_invalid_word_count(tmp_path):
+    source = load_source(SAMPLE)
+
+    try:
+        write_short_videos(source, tmp_path, words_per_short=0)
+    except ValueError as error:
+        assert "at least 1" in str(error)
+    else:
+        raise AssertionError("Expected ValueError")

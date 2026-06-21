@@ -46,6 +46,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_source_out_args(build)
     _add_example_style_arg(build)
     _add_word_repetition_arg(build)
+    _add_video_words_per_short_arg(build)
     build.add_argument("--deck-name", required=True)
     build.add_argument(
         "--tts-provider",
@@ -87,6 +88,24 @@ def _add_word_repetition_arg(parser: argparse.ArgumentParser) -> None:
         default=2,
         type=int,
         help="Number of times the Japanese vocabulary is read out (default: 2)",
+    )
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def _add_video_words_per_short_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--video-words-per-short",
+        type=_positive_int,
+        help=(
+            "Create multiple video outputs under shorts/ with this many active "
+            "vocabulary entries per video. Omit to keep the original single long video."
+        ),
     )
 
 
@@ -165,6 +184,7 @@ def _build_command(args: argparse.Namespace) -> int:
             source, args.out, make_video=args.video, audio_paths=audio_paths,
             example_style=args.example_style,
             word_repetition=args.word_repetition,
+            words_per_short=args.video_words_per_short,
         )
     except Exception as error:
         video_error = str(error)
@@ -180,10 +200,14 @@ def _build_command(args: argparse.Namespace) -> int:
         output_lines.append(f"- Subtitles: {video_assets['subtitles'].name}")
     if video_assets["video"] is not None:
         output_lines.append(f"- Video: {video_assets['video'].name}")
-    elif video_error is not None:
+    for short_video in video_assets.get("videos", []):
+        output_lines.append(f"- Short video: {short_video.relative_to(args.out)}")
+    if video_error is not None:
         output_lines.append(f"- Warning: video assets failed: {video_error}")
     elif args.video and not ffmpeg_available():
-        output_lines.append("- Warning: ffmpeg unavailable; video.mp4 was not created")
+        output_lines.append("- Warning: ffmpeg unavailable; video output was not created")
+    elif args.video and args.video_words_per_short is not None and not video_assets.get("videos"):
+        output_lines.append("- Warning: no short videos were created")
 
     tts_status = "WARN" if tts_result.errors else "OK"
     tts_lines = [
@@ -191,6 +215,7 @@ def _build_command(args: argparse.Namespace) -> int:
         f"- Provider: {args.tts_provider}",
         f"- Example style: {args.example_style}",
         f"- Word repetition count: {args.word_repetition}",
+        f"- Video words per short: {args.video_words_per_short or 'long video'}",
         f"- Generated: {len(tts_result.generated)}",
         f"- Skipped: {tts_result.skipped}",
     ]
