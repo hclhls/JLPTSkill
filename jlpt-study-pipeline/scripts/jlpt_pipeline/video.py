@@ -9,6 +9,109 @@ from jinja2 import Environment, FileSystemLoader
 
 from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
 
+
+def _is_cjk(char: str) -> bool:
+    """Check if character is CJK (Chinese, Japanese, Korean)."""
+    code = ord(char)
+    return (
+        (0x4E00 <= code <= 0x9FFF) or  # CJK Unified Ideographs
+        (0x3040 <= code <= 0x309F) or  # Hiragana
+        (0x30A0 <= code <= 0x30FF) or  # Katakana
+        (0x3100 <= code <= 0x312F)     # Bopomofo
+    )
+
+
+def _estimate_char_width(font_size: int) -> float:
+    """Estimate average character width in pixels based on font size.
+
+    Approximate formula: width ≈ font_size * 0.6 for monospaced/CJK fonts.
+    """
+    return font_size * 0.6
+
+
+def wrap_text(
+    text: str,
+    style: str,
+    max_width_px: int,
+    font_size: int,
+) -> str:
+    """Wrap text to fit within max_width_px, inserting ASS newlines.
+
+    For CJK text: wraps at character boundaries (no spaces in CJK).
+    For Latin text: wraps at word boundaries.
+    Mixed text: wraps at CJK char boundaries or Latin word boundaries.
+
+    Args:
+        text: Text to wrap
+        style: ASS style name ("Term", "Body", etc.) - for future style-specific rules
+        max_width_px: Maximum width in pixels
+        font_size: Font size in points
+
+    Returns:
+        Text with \\N (ASS newline) inserted at wrap points
+    """
+    if not text:
+        return text
+
+    char_width = _estimate_char_width(font_size)
+    max_chars_per_line = int(max_width_px / char_width)
+
+    if max_chars_per_line <= 0:
+        max_chars_per_line = 1
+
+    lines: list[str] = []
+    current_line: list[str] = []
+    current_width = 0
+
+    i = 0
+    while i < len(text):
+        char = text[i]
+
+        if _is_cjk(char):
+            # CJK character - check if it fits
+            if current_width + 1 > max_chars_per_line:
+                if current_line:
+                    lines.append("".join(current_line))
+                    current_line = []
+                    current_width = 0
+
+            current_line.append(char)
+            current_width += 1
+            i += 1
+        elif char.isspace():
+            # Space - start new line if needed
+            if current_width > 0:
+                lines.append("".join(current_line))
+                current_line = []
+                current_width = 0
+            i += 1
+        else:
+            # Latin word - collect until space
+            word_chars = []
+            word_width = 0
+            while i < len(text) and not text[i].isspace() and not _is_cjk(text[i]):
+                word_chars.append(text[i])
+                word_width += 1
+                i += 1
+
+            word = "".join(word_chars)
+
+            # Check if word fits on current line
+            if current_width + word_width > max_chars_per_line:
+                if current_line:
+                    lines.append("".join(current_line))
+                    current_line = []
+                    current_width = 0
+
+            current_line.append(word)
+            current_width += word_width
+
+    if current_line:
+        lines.append("".join(current_line))
+
+    return r"\N".join(lines)
+
+
 FALLBACK_ITEM_SECONDS = 2.5
 AUDIO_GAP_SECONDS = 0.6
 TRAILING_SECONDS = 0.6
