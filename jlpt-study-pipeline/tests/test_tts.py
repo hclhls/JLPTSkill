@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples" / "source.sample.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import jlpt_pipeline.tts as tts
 from jlpt_pipeline.tts import (
     DEFAULT_PROVIDER,
     DEFAULT_VOICE,
@@ -85,6 +86,18 @@ def test_default_provider_is_edge():
     assert DEFAULT_ZH_TW_VOICE == "zh-TW-HsiaoChenNeural"
 
 
+def test_edge_tts_command_resolves_from_active_virtualenv(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    edge_tts = bin_dir / "edge-tts"
+    edge_tts.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(tts.shutil, "which", lambda name: None)
+    monkeypatch.setattr(tts.sys, "executable", str(bin_dir / "python"))
+
+    assert tts._edge_tts_command() == str(edge_tts)
+
+
 def test_synthesize_entries_none_provider_creates_audio_and_skips_items(tmp_path):
     source = load_source(SAMPLE)
 
@@ -150,7 +163,7 @@ def test_edge_tts_success_writes_files_and_uses_expected_command(tmp_path, monke
     assert all(path.read_bytes() == b"edge-audio" for path in result.generated)
     # At least one call uses the Japanese voice with the first term
     assert any(
-        c["command"][:5] == ["edge-tts", "--voice", "ja-JP-NanamiNeural", "--text", "しみじみ"]
+        c["command"][1:5] == ["--voice", "ja-JP-NanamiNeural", "--text", "しみじみ"]
         for c in calls
     )
     # At least one call uses the Chinese voice

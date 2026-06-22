@@ -68,6 +68,16 @@ def test_ffmpeg_filter_path_escapes_filter_special_characters():
     )
 
 
+def test_ffmpeg_filter_path_includes_escaped_fontsdir_when_provided():
+    path = Path("/tmp/a,b/subtitles.ass")
+    fonts_dir = Path("/tmp/fonts:cjk")
+
+    assert (
+        ffmpeg_filter_path(path, fonts_dir=fonts_dir)
+        == "ass=filename='/tmp/a\\,b/subtitles.ass':fontsdir='/tmp/fonts\\:cjk'"
+    )
+
+
 def test_write_silent_video_uses_escaped_ass_filter(tmp_path, monkeypatch):
     source = load_source(SAMPLE)
     out_dir = tmp_path / "a,b:c[d]e'f\\g"
@@ -84,7 +94,9 @@ def test_write_silent_video_uses_escaped_ass_filter(tmp_path, monkeypatch):
     assert output == out_dir / "video.mp4"
     command, kwargs = calls[0]
     vf_arg = command[command.index("-vf") + 1]
-    assert vf_arg == ffmpeg_filter_path(out_dir / "subtitles.ass")
+    assert vf_arg == ffmpeg_filter_path(
+        out_dir / "subtitles.ass", fonts_dir=video.bundled_fonts_dir()
+    )
     assert kwargs["check"] is True
 
 

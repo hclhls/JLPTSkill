@@ -15,8 +15,16 @@ TRAILING_SECONDS = 0.6
 # Defines (style, kind, text_fn) for each video segment.
 # "term" appears only once visually but its audio is played twice consecutively.
 # "example_ja" includes the Chinese translation as a bracketed subtitle line.
+def display_term_with_kana(entry: dict[str, Any]) -> str:
+    term = str(entry["term"])
+    kana = str(entry.get("kana") or "")
+    if kana and kana != term:
+        return f"{term}（{kana}）"
+    return term
+
+
 VIDEO_ITEM_FIELDS = [
-    ("Term", "term", lambda entry: f"{entry['term']} ({entry['kana']})"),
+    ("Term", "term", display_term_with_kana),
     ("Body", "zh_tw_meaning", lambda entry: entry["zh_tw_meaning"]),
     ("Body", "example_ja", lambda entry: (
         f"{entry['example_ja']}\n（{entry['example_zh_tw']}）"
@@ -55,11 +63,26 @@ def escape_ass(text: Any) -> str:
     )
 
 
-def ffmpeg_filter_path(path: Path) -> str:
+def _escape_ass_filter_value(path: Path) -> str:
     escaped = path.as_posix().replace("\\", r"\\")
     for char in ("'", ":", ",", "[", "]"):
         escaped = escaped.replace(char, f"\\{char}")
-    return f"ass=filename='{escaped}'"
+    return escaped
+
+
+def bundled_fonts_dir() -> Path | None:
+    fonts_dir = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+    if any(fonts_dir.glob("*.otf")) or any(fonts_dir.glob("*.ttf")) or any(fonts_dir.glob("*.ttc")):
+        return fonts_dir
+    return None
+
+
+def ffmpeg_filter_path(path: Path, fonts_dir: Path | None = None) -> str:
+    escaped = _escape_ass_filter_value(path)
+    filter_arg = f"ass=filename='{escaped}'"
+    if fonts_dir is not None:
+        filter_arg += f":fontsdir='{_escape_ass_filter_value(fonts_dir)}'"
+    return filter_arg
 
 
 def write_narration(source: dict[str, Any], out_dir: Path) -> Path:
@@ -71,7 +94,7 @@ def write_narration(source: dict[str, Any], out_dir: Path) -> Path:
         blocks.append(
             "\n".join(
                 [
-                    f"{entry['id']} {entry['term']} ({entry['kana']})",
+                    f"{entry['id']} {display_term_with_kana(entry)}",
                     f"Meaning: {entry['zh_tw_meaning']}",
                     f"Example JA: {entry['example_ja']}",
                     f"Example ZH: {entry['example_zh_tw']}",
@@ -218,6 +241,7 @@ def write_video(
     out_dir.mkdir(parents=True, exist_ok=True)
     timed_audio = audio_paths or None
     subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio)
+    fonts_dir = bundled_fonts_dir()
     output = out_dir / "video.mp4"
     duration = timeline_duration(source, audio_paths=timed_audio)
 
@@ -283,7 +307,7 @@ def write_video(
             "-i",
             narration_combined.as_posix(),
             "-vf",
-            ffmpeg_filter_path(subtitles),
+            ffmpeg_filter_path(subtitles, fonts_dir=fonts_dir),
             "-map",
             "0:v",
             "-map",
@@ -310,7 +334,7 @@ def write_video(
             "-i",
             f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
             "-vf",
-            ffmpeg_filter_path(subtitles),
+            ffmpeg_filter_path(subtitles, fonts_dir=fonts_dir),
             "-c:v",
             "libx264",
             "-pix_fmt",

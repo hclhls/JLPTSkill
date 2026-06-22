@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -115,6 +117,18 @@ def synthesize_entries(
     return result
 
 
+def _edge_tts_command() -> str:
+    executable = shutil.which("edge-tts")
+    if executable:
+        return executable
+
+    venv_executable = Path(sys.executable).with_name("edge-tts")
+    if venv_executable.exists():
+        return str(venv_executable)
+
+    return "edge-tts"
+
+
 def _synthesize_item(
     item: TtsItem,
     audio_dir: Path,
@@ -132,7 +146,7 @@ def _synthesize_item(
             return None, None, True
 
     command = [
-        "edge-tts",
+        _edge_tts_command(),
         "--voice",
         item.voice,
         "--text",
