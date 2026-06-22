@@ -235,3 +235,58 @@ def test_edge_tts_missing_command_continues_and_skips(tmp_path, monkeypatch):
     assert result.skipped == 8
     assert len(result.errors) == 6
     assert all("edge-tts command not found" in error for error in result.errors)
+
+
+def test_tts_uses_kana_instead_of_kanji_term():
+    source = {
+        "metadata": {"topic": "test", "verification_policy": "reviewed"},
+        "entries": [
+            {
+                "id": "test-001",
+                "term": "施錠",
+                "kana": "せじょう",
+                "zh_tw_meaning": "上鎖",
+                "example_ja": "施錠してください",
+                "verification_status": "reviewed",
+            }
+        ]
+    }
+    items = tts_items(source)
+    # The term items should use the pronunciation (kana) "せじょう" instead of the kanji "施錠"
+    assert items[0].text == "せじょう"
+    assert items[1].text == "せじょう"
+    # example_ja remains intact
+    assert items[3].text == "施錠してください"
+
+
+def test_tts_items_with_custom_repetition():
+    source = {
+        "metadata": {"topic": "test", "verification_policy": "reviewed"},
+        "entries": [
+            {
+                "id": "test-001",
+                "term": "施錠",
+                "kana": "せじょう",
+                "zh_tw_meaning": "上鎖",
+                "example_ja": "施錠してください",
+                "verification_status": "reviewed",
+            }
+        ]
+    }
+    # 3 repetitions
+    items_3 = tts_items(source, word_repetition=3)
+    assert len(items_3) == 5  # 3 terms + 1 meaning + 1 example
+    assert [item.kind for item in items_3] == ["term", "term", "term", "zh_tw_meaning", "example_ja"]
+    assert items_3[0].text == "せじょう"
+    assert items_3[1].text == "せじょう"
+    assert items_3[2].text == "せじょう"
+
+    # 1 repetition
+    items_1 = tts_items(source, word_repetition=1)
+    assert len(items_1) == 3  # 1 term + 1 meaning + 1 example
+    assert [item.kind for item in items_1] == ["term", "zh_tw_meaning", "example_ja"]
+
+    # 0 repetitions
+    items_0 = tts_items(source, word_repetition=0)
+    assert len(items_0) == 2  # 0 terms + 1 meaning + 1 example
+    assert [item.kind for item in items_0] == ["zh_tw_meaning", "example_ja"]

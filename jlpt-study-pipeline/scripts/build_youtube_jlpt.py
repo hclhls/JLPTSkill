@@ -15,6 +15,32 @@ def get_video_id(url_or_id: str) -> str:
             return url_or_id.split("youtu.be/")[1].split("?")[0]
     return url_or_id
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def ask_video_words_per_short() -> int | None:
+    if not sys.stdin.isatty():
+        return None
+
+    print("\n=== Video Length ===")
+    print("Press Enter to generate one long video with all vocabulary.")
+    while True:
+        answer = input("Words per YouTube short video? ").strip()
+        if answer == "":
+            return None
+        try:
+            value = int(answer)
+        except ValueError:
+            print("Please enter a positive integer, or press Enter for one long video.")
+            continue
+        if value >= 1:
+            return value
+        print("Please enter a value of 1 or greater.")
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Automate the JLPT study pipeline for a YouTube video.")
     parser.add_argument("--url", required=True, help="YouTube Video URL or ID")
@@ -22,6 +48,11 @@ def main() -> int:
     parser.add_argument("--deck-name", default="YouTube JLPT Study", help="Anki deck name")
     parser.add_argument("--voice", default="ja-JP-NanamiNeural", help="TTS Voice")
     parser.add_argument("--video", action="store_true", help="Build MP4 video output")
+    parser.add_argument(
+        "--video-words-per-short",
+        type=positive_int,
+        help="Create YouTube short-style segmented videos with this many words per video. Omit for an interactive prompt when possible.",
+    )
     args = parser.parse_args()
 
     video_id = get_video_id(args.url)
@@ -83,6 +114,10 @@ def main() -> int:
         if deleted_count > 0:
             print(f"Deleted {deleted_count} 0-byte cache MP3 file(s).")
 
+    video_words_per_short = args.video_words_per_short
+    if args.video and video_words_per_short is None:
+        video_words_per_short = ask_video_words_per_short()
+
     print("\n=== Step 4: Running Build Pipeline ===")
     # Add virtual environment bin to PATH so edge-tts can be executed
     venv_bin = Path(__file__).resolve().parents[1] / ".venv" / "bin"
@@ -101,6 +136,8 @@ def main() -> int:
     ]
     if args.video:
         cmd.append("--video")
+        if video_words_per_short is not None:
+            cmd.extend(["--video-words-per-short", str(video_words_per_short)])
 
     print(f"Running command: {' '.join(cmd)}")
     result = subprocess.run(cmd, env=env)
@@ -110,8 +147,10 @@ def main() -> int:
         print(f"All files have been successfully generated in {out_dir}")
         print(f"- Obsidian Markdown: {out_dir}/{video_id}.md")
         print(f"- Anki Package: {out_dir}/{args.deck_name.lower().replace(' ', '-')}.apkg")
-        if args.video:
+        if args.video and video_words_per_short is None:
             print(f"- Video: {out_dir}/video.mp4")
+        elif args.video:
+            print(f"- Short videos: {out_dir}/shorts/short_*/video.mp4")
     else:
         print(f"\nError: Pipeline build exited with code {result.returncode}", file=sys.stderr)
         return result.returncode

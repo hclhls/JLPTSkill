@@ -24,5 +24,12 @@ out/
 
 # Local source material
 sources/
+source/
+
 # Local development notes
 docs/
+generate_part4.py
+metadata.txt
+noto-sans-jp.zip
+scratch/
+source.json

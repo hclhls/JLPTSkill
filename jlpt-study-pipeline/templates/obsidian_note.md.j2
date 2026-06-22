@@ -35,7 +35,8 @@ verification_policy: {{ metadata.verification_policy }}
 {% if entry.usage_note_zh_tw %}- 使用備註：{{ entry.usage_note_zh_tw }}
 {% endif -%}
 - 日文例句：{{ entry.example_ja }}
-- 例句翻譯：{{ entry.example_zh_tw }}
+{% if entry.example_ja_phrase %}- 簡短片語：{{ entry.example_ja_phrase }}
+{% endif %}- 例句翻譯：{{ entry.example_zh_tw }}
 {% if entry.similar_terms %}- 相近詞：{{ entry.similar_terms | join("、") }}
 {% endif -%}
 {% if entry.contrast_note_zh_tw %}- 對比備註：{{ entry.contrast_note_zh_tw }}
