@@ -221,12 +221,12 @@ def _build_command(args: argparse.Namespace) -> int:
         max_chars=args.max_tts_chars,
         use_cache=not args.no_tts_cache,
         example_style=args.example_style,
-        word_repetition=video_field_config.term_count,
+        config=video_field_config,
     )
     audio_paths = audio_paths_for_source(
         source, args.out, voice=args.voice, zh_voice=args.zh_voice,
         example_style=args.example_style,
-        word_repetition=video_field_config.term_count,
+        config=video_field_config,
     )
     video_assets: dict[str, Path | None] = {
         "narration": None,
@@ -238,7 +238,7 @@ def _build_command(args: argparse.Namespace) -> int:
         video_assets = build_video_assets(
             source, args.out, make_video=args.video, audio_paths=audio_paths,
             example_style=args.example_style,
-            word_repetition=video_field_config.term_count,
+            config=video_field_config,
             words_per_short=args.video_words_per_short,
         )
     except Exception as error:

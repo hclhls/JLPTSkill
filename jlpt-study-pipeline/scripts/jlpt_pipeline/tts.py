@@ -45,35 +45,27 @@ def tts_items(
     voice: str = DEFAULT_VOICE,
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
     config: VideoFieldConfig | None = None,
 ) -> list[TtsItem]:
     """Return TTS items for the pipeline.
 
-    If *config* is provided, field counts and ordering are taken from it and
-    *word_repetition* is ignored.  When *config* is None (the default) the
-    legacy behaviour is preserved: term repeated *word_repetition* times,
-    then zh_tw_meaning, then example_ja.
+    Args:
+        source: Loaded vocabulary source dictionary
+        voice: Voice for Japanese text (default: Nanami Neural)
+        zh_voice: Voice for Chinese text (default: Hsiao Chen Neural)
+        example_style: Style for example sentences (sentence or phrase)
+        config: VideoFieldConfig controlling field repetition and order (required)
 
-    ``example_zh_tw`` is intentionally omitted: the Chinese translation is
+    Returns:
+        List of TtsItem objects for audio synthesis
+
+    The ``example_zh_tw`` is intentionally omitted: the Chinese translation is
     shown as a bracketed subtitle on the same frame as the Japanese example
     sentence and does not have its own audio clip.
     """
-    if config is not None:
-        return _tts_items_from_config(source, voice, zh_voice, example_style, config)
-
-    items: list[TtsItem] = []
-    for entry in active_entries(source):
-        entry_id = str(entry["id"])
-        # Use kana for TTS pronunciation of the term to avoid incorrect Kanji pronunciation
-        term_tts_text = str(entry.get("kana") or entry["term"])
-        for _ in range(word_repetition):
-            items.append(TtsItem(entry_id, "term", term_tts_text, voice))
-        items.append(
-            TtsItem(entry_id, "zh_tw_meaning", str(entry["zh_tw_meaning"]), zh_voice)
-        )
-        items.append(TtsItem(entry_id, "example_ja", resolve_example(entry, example_style), voice))
-    return items
+    if config is None:
+        config = VideoFieldConfig()
+    return _tts_items_from_config(source, voice, zh_voice, example_style, config)
 
 
 def _tts_items_from_config(
@@ -121,10 +113,9 @@ def _tts_items_from_config(
 def estimate_tts_chars(
     source: dict[str, Any],
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
     config: VideoFieldConfig | None = None,
 ) -> TtsEstimate:
-    items = tts_items(source, example_style=example_style, word_repetition=word_repetition, config=config)
+    items = tts_items(source, example_style=example_style, config=config)
     return TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
 
 
@@ -134,7 +125,6 @@ def audio_paths_for_source(
     voice: str = DEFAULT_VOICE,
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
     config: VideoFieldConfig | None = None,
 ) -> dict[tuple[str, str], list[Path]]:
     """Return a dict mapping (entry_id, kind) to list of audio paths.
@@ -142,7 +132,7 @@ def audio_paths_for_source(
     This allows flexible ordering of audio files independent of their cache position.
     """
     audio_dir = out_dir / "audio"
-    items = tts_items(source, voice, zh_voice, example_style, word_repetition, config)
+    items = tts_items(source, voice, zh_voice, example_style, config)
 
     result: dict[tuple[str, str], list[Path]] = {}
     for item in items:
@@ -164,11 +154,11 @@ def synthesize_entries(
     max_chars: int | None = None,
     use_cache: bool = True,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> TtsResult:
     audio_dir = out_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
-    items = tts_items(source, voice, zh_voice, example_style, word_repetition)
+    items = tts_items(source, voice, zh_voice, example_style, config)
     estimate = TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
     result = TtsResult()
 

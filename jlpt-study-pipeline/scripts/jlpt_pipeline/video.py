@@ -8,6 +8,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader
 
 from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE, VideoFieldConfig
+from .tts import tts_items, DEFAULT_VOICE, DEFAULT_ZH_TW_VOICE
 
 
 def _is_cjk(char: str) -> bool:
@@ -255,15 +256,18 @@ def timeline_items(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> list[dict[str, Any]]:
     """Build timeline items from source entries.
 
     The "term" field is shown as a single unbroken visual segment but its audio
-    plays `word_repetition` times in a row (no silence gap between the repetitions).
+    plays `config.term_count` times in a row (no silence gap between the repetitions).
     The Chinese example translation is shown inline on the same frame as the
     Japanese example sentence and has no separate audio clip.
     """
+    if config is None:
+        config = VideoFieldConfig()
+
     # Build a per-entry VIDEO_ITEM_FIELDS that uses the resolved example style
     def _fields_for_entry(entry: dict[str, Any]):
         return [
@@ -284,13 +288,13 @@ def timeline_items(
                 # Consume all term audio clips; combine their durations so
                 # there is no visual gap between the repetitions.
                 term_audios = []
-                for _ in range(word_repetition):
+                for _ in range(config.term_count):
                     term_audios.append(next(audio_iter, None))
 
                 duration = 0.0
                 if audio_paths is None:
                     # Silent video fallback or when no audio paths are provided at all
-                    duration = max(word_repetition, 1) * FALLBACK_ITEM_SECONDS
+                    duration = max(config.term_count, 1) * FALLBACK_ITEM_SECONDS
                 else:
                     for audio in term_audios:
                         dur = FALLBACK_ITEM_SECONDS
@@ -341,9 +345,9 @@ def timeline_duration(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> float:
-    items = timeline_items(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+    items = timeline_items(source, audio_paths=audio_paths, example_style=example_style, config=config)
     if not items:
         return FALLBACK_ITEM_SECONDS + TRAILING_SECONDS
     return items[-1]["end"] + TRAILING_SECONDS
@@ -353,7 +357,7 @@ def subtitle_lines(
     source: dict[str, Any],
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -362,7 +366,7 @@ def subtitle_lines(
             "style": item["style"],
             "text": item["text"],
         }
-        for item in timeline_items(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+        for item in timeline_items(source, audio_paths=audio_paths, example_style=example_style, config=config)
     ]
 
 
@@ -371,7 +375,7 @@ def write_subtitles(
     out_dir: Path,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "subtitles.ass"
@@ -380,7 +384,7 @@ def write_subtitles(
     output.write_text(
         template.render(
             title=title,
-            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition),
+            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style, config=config),
         ),
         encoding="utf-8",
     )
@@ -391,8 +395,8 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
-def _entry_audio_count(word_repetition: int) -> int:
-    return max(word_repetition, 1) + 2
+def _entry_audio_count(config: VideoFieldConfig) -> int:
+    return max(config.term_count, 1) + 2
 
 
 def _chunked(items: list[Any], chunk_size: int) -> list[list[Any]]:
@@ -536,17 +540,20 @@ def write_video_file(
     out_dir: Path,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> Path | None:
     if not ffmpeg_available():
         return None
 
+    if config is None:
+        config = VideoFieldConfig()
+
     out_dir.mkdir(parents=True, exist_ok=True)
     timed_audio = audio_paths or None
-    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition)
+    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style, config=config)
     fonts_dir = bundled_fonts_dir()
     output = out_dir / "video.mp4"
-    duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition)
+    duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style, config=config)
 
     # Check if there are usable audio files
     usable_audio = [path for path in audio_paths or [] if path.exists()]
@@ -570,7 +577,7 @@ def write_video_file(
         # Create concat.txt
         concat_txt = out_dir / "concat.txt"
         lines = []
-        for item in timeline_items(source, audio_paths=timed_audio, example_style=example_style, word_repetition=word_repetition):
+        for item in timeline_items(source, audio_paths=timed_audio, example_style=example_style, config=config):
             if item["audio_paths"]:
                 for ap in item["audio_paths"]:
                     if ap is not None and ap.exists():
@@ -650,22 +657,38 @@ def write_silent_video(
     source: dict[str, Any],
     out_dir: Path,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> Path | None:
-    return write_video_file(source, out_dir, audio_paths=None, example_style=example_style, word_repetition=word_repetition)
+    return write_video_file(source, out_dir, audio_paths=None, example_style=example_style, config=config)
 
 
 def build_video_assets(
     source: dict[str, Any],
     out_dir: Path,
     make_video: bool = False,
-    audio_paths: list[Path] | None = None,
+    audio_paths: list[Path] | dict[tuple[str, str], list[Path]] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
     words_per_short: int | None = None,
 ) -> dict[str, Path | None]:
+    if config is None:
+        config = VideoFieldConfig()
+
+    # Convert dict-based audio_paths to flat list for old-style functions
+    flat_audio_paths: list[Path] | None = None
+    if isinstance(audio_paths, dict):
+        # Flatten the dict to a list by iterating through entries in source order
+        flat_audio_paths = []
+        items = tts_items(source, config=config, example_style=example_style)
+        for item in items:
+            key = (item.entry_id, item.kind)
+            if key in audio_paths:
+                flat_audio_paths.extend(audio_paths[key])
+    else:
+        flat_audio_paths = audio_paths
+
     narration = write_narration(source, out_dir, example_style=example_style)
-    subtitles = write_subtitles(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+    subtitles = write_subtitles(source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config)
     video = None
     videos: list[Path] = []
 
@@ -674,12 +697,12 @@ def build_video_assets(
             source,
             out_dir,
             words_per_short=words_per_short,
-            audio_paths=audio_paths,
+            audio_paths=flat_audio_paths,
             example_style=example_style,
-            word_repetition=word_repetition,
+            config=config,
         )
     elif make_video:
-        video = write_video_file(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+        video = write_video_file(source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config)
 
     return {"narration": narration, "subtitles": subtitles, "video": video, "videos": videos}
 
@@ -690,10 +713,13 @@ def write_short_videos(
     words_per_short: int,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
-    word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> list[Path]:
     if words_per_short < 1:
         raise ValueError("words_per_short must be at least 1")
+
+    if config is None:
+        config = VideoFieldConfig()
 
     entries = active_entries(source)
     if not entries:
@@ -703,7 +729,7 @@ def write_short_videos(
     if audio_paths is None:
         audio_chunks: list[list[Path] | None] = [None for _ in entry_chunks]
     else:
-        clips_per_entry = _entry_audio_count(word_repetition)
+        clips_per_entry = _entry_audio_count(config)
         audio_chunks = _chunked(audio_paths, words_per_short * clips_per_entry)
 
     videos: list[Path] = []
@@ -717,7 +743,7 @@ def write_short_videos(
             short_dir,
             audio_paths=chunk_audio,
             example_style=example_style,
-            word_repetition=word_repetition,
+            config=config,
         )
         if video is not None:
             videos.append(video)
