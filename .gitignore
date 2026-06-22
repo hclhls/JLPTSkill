@@ -35,3 +35,10 @@ noto-sans-jp.zip
 scratch/
 **/scratch/
 source.json
+
+# Superpowers internal files
+**/.superpowers/
+
+# Font files (large binary assets)
+*.otf
+*.ttf
