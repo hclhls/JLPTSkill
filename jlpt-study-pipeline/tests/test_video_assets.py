@@ -8,6 +8,7 @@ SAMPLE = ROOT / "examples" / "source.sample.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import jlpt_pipeline.video as video
+from jlpt_pipeline.models import VideoFieldConfig
 from jlpt_pipeline.validation import load_source
 from jlpt_pipeline.video import (
     build_video_assets,
@@ -18,7 +19,10 @@ from jlpt_pipeline.video import (
     write_short_videos,
     write_silent_video,
     write_subtitles,
+    write_video,
+    write_video_file,
 )
+from jlpt_pipeline.models import EXAMPLE_STYLE_SENTENCE
 
 
 def test_write_narration_skips_rejected_entries_and_anki_prompts(tmp_path):
@@ -148,7 +152,7 @@ def test_write_video_with_audio_places_mp3_inputs_on_duration_driven_timeline(tm
     monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
     monkeypatch.setattr(video.subprocess, "run", capture_run)
 
-    output = video.write_video(source, tmp_path, audio_paths=audio_paths)
+    output = video.write_video_file(source, tmp_path, audio_paths=audio_paths)
 
     assert output == tmp_path / "video.mp4"
     # calls[0] and calls[1] create silence files; calls[2] runs concat demuxer;
@@ -215,7 +219,7 @@ def test_video_assets_with_custom_repetition(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(video.subprocess, "run", capture_run)
 
-    output = video.write_video(source, tmp_path, audio_paths=audio_paths, word_repetition=3)
+    output = video.write_video_file(source, tmp_path, audio_paths=audio_paths, word_repetition=3)
     assert output == tmp_path / "video.mp4"
 
     concat_txt = tmp_path / "concat.txt"
@@ -276,3 +280,126 @@ def test_write_short_videos_rejects_invalid_word_count(tmp_path):
         assert "at least 1" in str(error)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_write_video_portrait_mode(tmp_path, monkeypatch):
+    """Test that portrait mode produces 1080x1920 resolution in ASS output."""
+    from jlpt_pipeline.models import active_entries
+
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig()
+    entries = active_entries(source)
+
+    audio_paths_dict = {
+        (str(entry["id"]), kind): [tmp_path / f"audio_{entry['id']}_{kind}.wav"]
+        for entry in entries
+        for kind in ["term", "zh_tw_meaning", "example_ja"]
+    }
+
+    # Create dummy audio files
+    for path_list in audio_paths_dict.values():
+        for p in path_list:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"dummy")
+
+    # Monkeypatch audio_duration_seconds to avoid needing ffprobe
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: 1.5)
+
+    result = write_video(
+        source,
+        tmp_path,
+        audio_paths_dict,
+        config,
+        portrait=True,
+        example_style=EXAMPLE_STYLE_SENTENCE,
+    )
+
+    # Verify it's a Path
+    assert isinstance(result, Path)
+
+    # Verify ASS file contains portrait dimensions
+    ass_file = tmp_path / "narration.ass"
+    assert ass_file.exists()
+    content = ass_file.read_text()
+    assert "PlayResX: 1080" in content
+    assert "PlayResY: 1920" in content
+    assert "Style: Term,Noto Sans CJK JP,80," in content
+    assert "Style: Body,Noto Sans CJK JP,52," in content
+
+
+def test_write_video_landscape_mode(tmp_path, monkeypatch):
+    """Test that landscape (default) mode produces 1920x1080 resolution in ASS output."""
+    from jlpt_pipeline.models import active_entries
+
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig()
+    entries = active_entries(source)
+
+    audio_paths_dict = {
+        (str(entry["id"]), kind): [tmp_path / f"audio_{entry['id']}_{kind}.wav"]
+        for entry in entries
+        for kind in ["term", "zh_tw_meaning", "example_ja"]
+    }
+
+    for path_list in audio_paths_dict.values():
+        for p in path_list:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"dummy")
+
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: 1.5)
+
+    result = write_video(
+        source,
+        tmp_path,
+        audio_paths_dict,
+        config,
+        portrait=False,
+        example_style=EXAMPLE_STYLE_SENTENCE,
+    )
+
+    assert isinstance(result, Path)
+
+    ass_file = tmp_path / "narration.ass"
+    assert ass_file.exists()
+    content = ass_file.read_text()
+    assert "PlayResX: 1920" in content
+    assert "PlayResY: 1080" in content
+    assert "Style: Term,Noto Sans CJK JP,128," in content
+    assert "Style: Body,Noto Sans CJK JP,76," in content
+
+
+def test_write_video_uses_dict_audio_lookup_by_entry_id_and_kind(tmp_path, monkeypatch):
+    """Test that write_video() correctly looks up audio by (entry_id, kind) key."""
+    from jlpt_pipeline.models import active_entries
+
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig(term_count=1, meaning_count=1, example_count=1)
+    entries = active_entries(source)
+
+    # Only provide audio for the first entry term - other entries get no audio
+    first_entry_id = str(entries[0]["id"])
+    audio_paths_dict: dict[tuple[str, str], list[Path]] = {
+        (first_entry_id, "term"): [tmp_path / "term.wav"],
+        (first_entry_id, "zh_tw_meaning"): [tmp_path / "meaning.wav"],
+        (first_entry_id, "example_ja"): [tmp_path / "example.wav"],
+    }
+
+    for path_list in audio_paths_dict.values():
+        for p in path_list:
+            p.write_bytes(b"dummy")
+
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: 2.0)
+
+    result = write_video(
+        source,
+        tmp_path,
+        audio_paths_dict,
+        config,
+    )
+
+    assert isinstance(result, Path)
+    ass_file = tmp_path / "narration.ass"
+    assert ass_file.exists()
+    content = ass_file.read_text()
+    # First entry's term should appear
+    assert "しみじみ" in content

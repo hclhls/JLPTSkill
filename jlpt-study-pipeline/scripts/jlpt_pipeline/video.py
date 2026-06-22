@@ -7,7 +7,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
+from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE, VideoFieldConfig
 
 
 def _is_cjk(char: str) -> bool:
@@ -409,6 +409,131 @@ def _source_for_entries(source: dict[str, Any], entries: list[dict[str, Any]], p
 def write_video(
     source: dict[str, Any],
     out_dir: Path,
+    audio_paths_dict: dict[tuple[str, str], list[Path]],
+    config: VideoFieldConfig,
+    portrait: bool = False,
+    example_style: str = EXAMPLE_STYLE_SENTENCE,
+    fonts_dir: Path | None = None,
+) -> Path:
+    """Generate an ASS video subtitle file with narration timeline.
+
+    Args:
+        source: Loaded vocabulary source dictionary
+        out_dir: Output directory for ASS and video files
+        audio_paths_dict: Dict mapping (entry_id, kind) to list of audio file paths
+        config: VideoFieldConfig controlling field repetition and order
+        portrait: If True, use 1080×1920 vertical format; else 1920×1080
+        example_style: Style for example sentences (sentence or phrase)
+        fonts_dir: Optional directory containing custom fonts
+
+    Returns:
+        Path to generated ASS file
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine dimensions and font sizes based on portrait mode
+    if portrait:
+        play_res_x = 1080
+        play_res_y = 1920
+        term_font_size = 80
+        body_font_size = 52
+        term_max_width = 960
+        body_max_width = 1000
+    else:
+        play_res_x = 1920
+        play_res_y = 1080
+        term_font_size = 128
+        body_font_size = 76
+        term_max_width = 1680
+        body_max_width = 1620
+
+    lines: list[dict[str, Any]] = []
+    current_time = 0.0
+
+    for entry in active_entries(source):
+        entry_id = str(entry["id"])
+
+        # Get ordered fields based on config
+        for field_name, _ in config.ordered_fields():
+            if field_name == "term":
+                if config.term_count == 0:
+                    continue
+
+                audio_list = audio_paths_dict.get((entry_id, "term"), [])
+                for audio_path in audio_list:
+                    duration = audio_duration_seconds(audio_path)
+                    term_text = display_term_with_kana(entry)
+                    wrapped_text = wrap_text(term_text, "Term", term_max_width, term_font_size)
+
+                    lines.append({
+                        "start": current_time,
+                        "end": current_time + duration,
+                        "style": "Term",
+                        "text": wrapped_text,
+                    })
+                    current_time += duration + AUDIO_GAP_SECONDS
+
+            elif field_name == "meaning":
+                if config.meaning_count == 0:
+                    continue
+
+                audio_list = audio_paths_dict.get((entry_id, "zh_tw_meaning"), [])
+                for audio_path in audio_list:
+                    duration = audio_duration_seconds(audio_path)
+                    meaning_text = get_meaning_text(entry)
+                    wrapped_text = wrap_text(meaning_text, "Body", body_max_width, body_font_size)
+
+                    lines.append({
+                        "start": current_time,
+                        "end": current_time + duration,
+                        "style": "Body",
+                        "text": wrapped_text,
+                    })
+                    current_time += duration + AUDIO_GAP_SECONDS
+
+            elif field_name == "example":
+                if config.example_count == 0:
+                    continue
+
+                audio_list = audio_paths_dict.get((entry_id, "example_ja"), [])
+                for audio_path in audio_list:
+                    duration = audio_duration_seconds(audio_path)
+                    example_text = get_example_text(entry, example_style)
+                    wrapped_text = wrap_text(example_text, "Body", body_max_width, body_font_size)
+
+                    lines.append({
+                        "start": current_time,
+                        "end": current_time + duration,
+                        "style": "Body",
+                        "text": wrapped_text,
+                    })
+                    current_time += duration + AUDIO_GAP_SECONDS
+
+    # Add trailing silence
+    if lines:
+        lines[-1]["end"] += TRAILING_SECONDS
+
+    # Render ASS template
+    env = _template_env()
+    template = env.get_template("video_scene.ass.j2")
+    rendered = template.render(
+        title=source.get("title", source.get("metadata", {}).get("topic", "JLPT Study")),
+        lines=lines,
+        play_res_x=play_res_x,
+        play_res_y=play_res_y,
+        term_font_size=term_font_size,
+        body_font_size=body_font_size,
+    )
+
+    ass_path = out_dir / "narration.ass"
+    ass_path.write_text(rendered, encoding="utf-8")
+
+    return ass_path
+
+
+def write_video_file(
+    source: dict[str, Any],
+    out_dir: Path,
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
@@ -527,7 +652,7 @@ def write_silent_video(
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
 ) -> Path | None:
-    return write_video(source, out_dir, audio_paths=None, example_style=example_style, word_repetition=word_repetition)
+    return write_video_file(source, out_dir, audio_paths=None, example_style=example_style, word_repetition=word_repetition)
 
 
 def build_video_assets(
@@ -554,7 +679,7 @@ def build_video_assets(
             word_repetition=word_repetition,
         )
     elif make_video:
-        video = write_video(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
+        video = write_video_file(source, out_dir, audio_paths=audio_paths, example_style=example_style, word_repetition=word_repetition)
 
     return {"narration": narration, "subtitles": subtitles, "video": video, "videos": videos}
 
@@ -587,7 +712,7 @@ def write_short_videos(
         short_dir = out_dir / "shorts" / f"short_{index:03d}"
         short_source = _source_for_entries(source, entries_chunk, index, part_count)
         chunk_audio = audio_chunks[index - 1] if index - 1 < len(audio_chunks) else None
-        video = write_video(
+        video = write_video_file(
             short_source,
             short_dir,
             audio_paths=chunk_audio,
