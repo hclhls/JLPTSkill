@@ -21,6 +21,7 @@ from jlpt_pipeline.tts import (
     synthesize_entries,
     tts_items,
 )
+from jlpt_pipeline.models import VideoFieldConfig, active_entries
 from jlpt_pipeline.validation import load_source
 
 
@@ -68,16 +69,26 @@ def test_estimate_tts_chars_skips_rejected_entries():
 def test_audio_paths_for_source_returns_paths_in_tts_item_order(tmp_path):
     source = load_source(SAMPLE)
 
-    paths = audio_paths_for_source(source, tmp_path, voice="ja-JP-NanamiNeural")
+    paths_dict = audio_paths_for_source(source, tmp_path, voice="ja-JP-NanamiNeural")
 
-    # 2 active entries × 4 items each (term×2, zh_tw_meaning, example_ja) = 8
-    assert [path.parent for path in paths] == [tmp_path / "audio"] * 8
+    # Should return a dict
+    assert isinstance(paths_dict, dict)
+
+    # Flatten all paths from the dict in tts_items order to verify audio dir
+    all_paths = [path for paths in paths_dict.values() for path in paths]
+    # 2 active entries × 4 items each (term×2, zh_tw_meaning, example_ja) = 8 total
+    assert len(all_paths) == 8
+    assert all(path.parent == tmp_path / "audio" for path in all_paths)
+
+    # Verify each path corresponds to expected hash
+    items = tts_items(source)
     expected_names = [
         hashlib.sha1(f"{item.voice}:{item.text}".encode("utf-8")).hexdigest()
         + ".mp3"
-        for item in tts_items(source)
+        for item in items
     ]
-    assert [path.name for path in paths] == expected_names
+    actual_names_in_order = [path.name for paths in paths_dict.values() for path in paths]
+    assert actual_names_in_order == expected_names
 
 
 def test_default_provider_is_edge():
@@ -290,3 +301,60 @@ def test_tts_items_with_custom_repetition():
     items_0 = tts_items(source, word_repetition=0)
     assert len(items_0) == 2  # 0 terms + 1 meaning + 1 example
     assert [item.kind for item in items_0] == ["zh_tw_meaning", "example_ja"]
+
+
+def test_tts_items_with_video_field_config():
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig(term_count=3, meaning_count=1, example_count=1)
+
+    items = tts_items(source, config=config)
+
+    # With term_count=3, should have 3 term entries per vocabulary
+    # Default order: term(1), meaning(2), example(3)
+    # So for first entry: term, term, term, meaning, example
+    assert items[0].kind == "term"
+    assert items[1].kind == "term"
+    assert items[2].kind == "term"
+    assert items[3].kind == "zh_tw_meaning"
+    assert items[4].kind == "example_ja"
+
+
+def test_audio_paths_for_source_returns_dict():
+    source = load_source(SAMPLE)
+    out_dir = Path("/tmp/test_audio")
+    config = VideoFieldConfig(term_count=2, meaning_count=1, example_count=1)
+
+    paths_dict = audio_paths_for_source(source, out_dir, config=config)
+
+    # Should return dict with keys like ("entry_id", "term"), ("entry_id", "meaning"), etc.
+    assert isinstance(paths_dict, dict)
+
+    # Get first entry id from source
+    first_entry_id = str(active_entries(source)[0]["id"])
+
+    # Should have keys for term, meaning, example
+    assert (first_entry_id, "term") in paths_dict
+    assert (first_entry_id, "zh_tw_meaning") in paths_dict
+    assert (first_entry_id, "example_ja") in paths_dict
+
+    # Values should be lists of Path
+    assert isinstance(paths_dict[(first_entry_id, "term")], list)
+    assert all(isinstance(p, Path) for p in paths_dict[(first_entry_id, "term")])
+
+
+def test_estimate_tts_chars_with_config():
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig(term_count=3, meaning_count=2, example_count=1)
+
+    estimate = estimate_tts_chars(source, config=config)
+
+    # Estimate should reflect the new counts
+    items = estimate.items
+
+    # Count term items for first entry
+    first_entry_id = str(active_entries(source)[0]["id"])
+    term_items = [item for item in items if item.entry_id == first_entry_id and item.kind == "term"]
+    assert len(term_items) == 3
+
+    meaning_items = [item for item in items if item.entry_id == first_entry_id and item.kind == "zh_tw_meaning"]
+    assert len(meaning_items) == 2

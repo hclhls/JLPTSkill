@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .models import active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
+from .models import VideoFieldConfig, active_entries, resolve_example, EXAMPLE_STYLE_SENTENCE
 
 DEFAULT_PROVIDER = "edge"
 DEFAULT_VOICE = "ja-JP-NanamiNeural"
@@ -46,18 +46,22 @@ def tts_items(
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> list[TtsItem]:
     """Return TTS items for the pipeline.
 
-    Order per entry:
-      1. term (Japanese, spoken `word_repetition` times)
-      2. zh_tw_meaning (Chinese)
-      3. example_ja / example_ja_phrase depending on *example_style*
+    If *config* is provided, field counts and ordering are taken from it and
+    *word_repetition* is ignored.  When *config* is None (the default) the
+    legacy behaviour is preserved: term repeated *word_repetition* times,
+    then zh_tw_meaning, then example_ja.
 
     ``example_zh_tw`` is intentionally omitted: the Chinese translation is
     shown as a bracketed subtitle on the same frame as the Japanese example
     sentence and does not have its own audio clip.
     """
+    if config is not None:
+        return _tts_items_from_config(source, voice, zh_voice, example_style, config)
+
     items: list[TtsItem] = []
     for entry in active_entries(source):
         entry_id = str(entry["id"])
@@ -72,12 +76,55 @@ def tts_items(
     return items
 
 
+def _tts_items_from_config(
+    source: dict[str, Any],
+    voice: str,
+    zh_voice: str,
+    example_style: str,
+    config: VideoFieldConfig,
+) -> list[TtsItem]:
+    """Return TTS items ordered and repeated according to *config*."""
+    items: list[TtsItem] = []
+    for entry in active_entries(source):
+        entry_id = str(entry["id"])
+        term_tts_text = str(entry.get("kana") or entry["term"])
+
+        field_data = {
+            "term": {
+                "count": config.term_count,
+                "text": term_tts_text,
+                "voice": voice,
+                "kind": "term",
+            },
+            "meaning": {
+                "count": config.meaning_count,
+                "text": str(entry["zh_tw_meaning"]),
+                "voice": zh_voice,
+                "kind": "zh_tw_meaning",
+            },
+            "example": {
+                "count": config.example_count,
+                "text": resolve_example(entry, example_style),
+                "voice": voice,
+                "kind": "example_ja",
+            },
+        }
+
+        for field_name, _ in config.ordered_fields():
+            data = field_data[field_name]
+            for _ in range(data["count"]):
+                items.append(TtsItem(entry_id, data["kind"], data["text"], data["voice"]))
+
+    return items
+
+
 def estimate_tts_chars(
     source: dict[str, Any],
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
+    config: VideoFieldConfig | None = None,
 ) -> TtsEstimate:
-    items = tts_items(source, example_style=example_style, word_repetition=word_repetition)
+    items = tts_items(source, example_style=example_style, word_repetition=word_repetition, config=config)
     return TtsEstimate(total_chars=sum(item.chars for item in items), items=items)
 
 
@@ -88,9 +135,24 @@ def audio_paths_for_source(
     zh_voice: str = DEFAULT_ZH_TW_VOICE,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     word_repetition: int = 2,
-) -> list[Path]:
+    config: VideoFieldConfig | None = None,
+) -> dict[tuple[str, str], list[Path]]:
+    """Return a dict mapping (entry_id, kind) to list of audio paths.
+
+    This allows flexible ordering of audio files independent of their cache position.
+    """
     audio_dir = out_dir / "audio"
-    return [_cache_path(audio_dir, item) for item in tts_items(source, voice, zh_voice, example_style, word_repetition)]
+    items = tts_items(source, voice, zh_voice, example_style, word_repetition, config)
+
+    result: dict[tuple[str, str], list[Path]] = {}
+    for item in items:
+        key = (item.entry_id, item.kind)
+        path = _cache_path(audio_dir, item)
+        if key not in result:
+            result[key] = []
+        result[key].append(path)
+
+    return result
 
 
 def synthesize_entries(
