@@ -100,6 +100,60 @@ def main() -> int:
         type=positive_int,
         help="Create YouTube short-style segmented videos with this many words per video. Omit for an interactive prompt when possible.",
     )
+    parser.add_argument(
+        "--term-count",
+        type=int,
+        default=2,
+        help="Term repetition count (default: 2)",
+    )
+    parser.add_argument(
+        "--meaning-count",
+        type=int,
+        default=1,
+        help="Meaning repetition count (default: 1)",
+    )
+    parser.add_argument(
+        "--example-count",
+        type=int,
+        default=1,
+        help="Example repetition count (default: 1)",
+    )
+    parser.add_argument(
+        "--show-example-translation",
+        action="store_true",
+        default=True,
+        help="Show English translation of example sentences (default: True)",
+    )
+    parser.add_argument(
+        "--no-show-example-translation",
+        action="store_false",
+        dest="show_example_translation",
+        help="Hide English translation of example sentences",
+    )
+    parser.add_argument(
+        "--term-order",
+        type=int,
+        default=1,
+        help="Display order for term (1-3, default: 1)",
+    )
+    parser.add_argument(
+        "--meaning-order",
+        type=int,
+        default=2,
+        help="Display order for meaning (1-3, default: 2)",
+    )
+    parser.add_argument(
+        "--example-order",
+        type=int,
+        default=3,
+        help="Display order for example (1-3, default: 3)",
+    )
+    parser.add_argument(
+        "--shorts-portrait",
+        action="store_true",
+        default=False,
+        help="Use vertical 1080×1920 format for short videos (default: False)",
+    )
     args = parser.parse_args()
 
     video_id = get_video_id(args.url)
@@ -162,8 +216,12 @@ def main() -> int:
             print(f"Deleted {deleted_count} 0-byte cache MP3 file(s).")
 
     video_words_per_short = args.video_words_per_short
-    if args.video and video_words_per_short is None:
-        video_words_per_short = ask_video_words_per_short()
+    video_field_config = None
+    if args.video:
+        # Ask for video field config in TTY mode
+        video_field_config = ask_video_field_config()
+        if video_words_per_short is None:
+            video_words_per_short = ask_video_words_per_short()
 
     print("\n=== Step 4: Running Build Pipeline ===")
     # Add virtual environment bin to PATH so edge-tts can be executed
@@ -172,6 +230,15 @@ def main() -> int:
     if venv_bin.exists():
         env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
 
+    # Use config from ask_video_field_config() if provided, otherwise use CLI args
+    term_count = video_field_config.term_count if video_field_config else args.term_count
+    meaning_count = video_field_config.meaning_count if video_field_config else args.meaning_count
+    example_count = video_field_config.example_count if video_field_config else args.example_count
+    show_example_translation = video_field_config.show_example_translation if video_field_config else args.show_example_translation
+    term_order = video_field_config.term_order if video_field_config else args.term_order
+    meaning_order = video_field_config.meaning_order if video_field_config else args.meaning_order
+    example_order = video_field_config.example_order if video_field_config else args.example_order
+
     cmd = [
         sys.executable, "scripts/jlpt_pipeline.py", "build",
         "--source", str(source_json_path),
@@ -179,8 +246,18 @@ def main() -> int:
         "--deck-name", args.deck_name,
         "--tts-provider", "edge",
         "--voice", args.voice,
-        "--slug", video_id
+        "--slug", video_id,
+        "--term-count", str(term_count),
+        "--meaning-count", str(meaning_count),
+        "--example-count", str(example_count),
+        "--term-order", str(term_order),
+        "--meaning-order", str(meaning_order),
+        "--example-order", str(example_order),
     ]
+    if not show_example_translation:
+        cmd.append("--no-show-example-translation")
+    if args.shorts_portrait:
+        cmd.append("--shorts-portrait")
     if args.video:
         cmd.append("--video")
         if video_words_per_short is not None:

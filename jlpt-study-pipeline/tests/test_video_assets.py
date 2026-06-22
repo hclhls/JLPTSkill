@@ -8,7 +8,7 @@ SAMPLE = ROOT / "examples" / "source.sample.json"
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import jlpt_pipeline.video as video
-from jlpt_pipeline.models import VideoFieldConfig
+from jlpt_pipeline.models import VideoFieldConfig, active_entries
 from jlpt_pipeline.validation import load_source
 from jlpt_pipeline.video import (
     build_video_assets,
@@ -23,6 +23,7 @@ from jlpt_pipeline.video import (
     write_video_file,
 )
 from jlpt_pipeline.models import EXAMPLE_STYLE_SENTENCE
+from jlpt_pipeline.tts import audio_paths_for_source
 
 
 def test_write_narration_skips_rejected_entries_and_anki_prompts(tmp_path):
@@ -205,7 +206,8 @@ def test_video_assets_with_custom_repetition(tmp_path, monkeypatch):
     monkeypatch.setattr(video, "audio_duration_seconds", lambda path: durations[path])
 
     # Check timeline_items
-    items = video.timeline_items(source, audio_paths=audio_paths, word_repetition=3)
+    config = VideoFieldConfig(term_count=3, meaning_count=1, example_count=1)
+    items = video.timeline_items(source, audio_paths=audio_paths, config=config)
     # Entry 1 term should combine clip-0, clip-1, clip-2 (each dur=1.0) -> duration=3.0
     assert items[0]["duration"] == 3.0
     assert len(items[0]["audio_paths"]) == 3
@@ -219,7 +221,7 @@ def test_video_assets_with_custom_repetition(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(video.subprocess, "run", capture_run)
 
-    output = video.write_video_file(source, tmp_path, audio_paths=audio_paths, word_repetition=3)
+    output = video.write_video_file(source, tmp_path, audio_paths=audio_paths, config=config)
     assert output == tmp_path / "video.mp4"
 
     concat_txt = tmp_path / "concat.txt"
@@ -403,3 +405,88 @@ def test_write_video_uses_dict_audio_lookup_by_entry_id_and_kind(tmp_path, monke
     content = ass_file.read_text()
     # First entry's term should appear
     assert "しみじみ" in content
+
+
+def test_integration_video_with_config(tmp_path, monkeypatch):
+    """Integration test: config → tts → audio paths → video."""
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig(
+        term_count=2,
+        meaning_count=1,
+        example_count=1,
+        show_example_translation=True,
+        term_order=1,
+        meaning_order=2,
+        example_order=3,
+    )
+
+    # Create dummy audio files
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    for entry in active_entries(source):
+        for kind in ["term", "zh_tw_meaning", "example_ja"]:
+            for i in range(2):
+                audio_file = audio_dir / f"{entry['id']}_{kind}_{i}.wav"
+                audio_file.write_bytes(b"\x00" * 44)
+
+    # Get audio paths as dict
+    audio_paths = audio_paths_for_source(source, tmp_path, config=config)
+
+    assert isinstance(audio_paths, dict)
+    assert len(audio_paths) > 0
+
+    # Monkeypatch audio_duration_seconds to avoid needing ffprobe
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: 1.5)
+
+    # Write video
+    video_path = write_video(
+        source,
+        tmp_path,
+        audio_paths,
+        config,
+        portrait=False,
+        example_style=EXAMPLE_STYLE_SENTENCE,
+    )
+
+    assert video_path.exists()
+    content = video_path.read_text()
+    assert "PlayResX: 1920" in content
+    assert "PlayResY: 1080" in content
+
+
+def test_integration_video_with_portrait_config(tmp_path, monkeypatch):
+    """Integration test: config → video in portrait mode."""
+    source = load_source(SAMPLE)
+    config = VideoFieldConfig(
+        term_count=1,
+        meaning_count=1,
+        example_count=1,
+    )
+
+    # Create dummy audio
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    for entry in active_entries(source):
+        for kind in ["term", "zh_tw_meaning", "example_ja"]:
+            audio_file = audio_dir / f"{entry['id']}_{kind}.wav"
+            audio_file.write_bytes(b"\x00" * 44)
+
+    audio_paths = audio_paths_for_source(source, tmp_path, config=config)
+
+    # Monkeypatch audio_duration_seconds
+    monkeypatch.setattr(video, "audio_duration_seconds", lambda path: 1.5)
+
+    # Write in portrait mode
+    video_path = write_video(
+        source,
+        tmp_path,
+        audio_paths,
+        config,
+        portrait=True,
+        example_style=EXAMPLE_STYLE_SENTENCE,
+    )
+
+    assert video_path.exists()
+    content = video_path.read_text()
+    assert "PlayResX: 1080" in content
+    assert "PlayResY: 1920" in content
