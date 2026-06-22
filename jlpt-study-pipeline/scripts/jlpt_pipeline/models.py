@@ -3,6 +3,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+
+@dataclass
+class VideoFieldConfig:
+    term_count: int = 2
+    meaning_count: int = 1
+    example_count: int = 1
+    show_example_translation: bool = True
+    term_order: int = 1
+    meaning_order: int = 2
+    example_order: int = 3
+
+    def ordered_fields(self) -> list[tuple[str, int]]:
+        """Return list of (field_name, order) tuples sorted by order value."""
+        fields_list = [
+            ("term", self.term_order),
+            ("meaning", self.meaning_order),
+            ("example", self.example_order),
+        ]
+        return sorted(fields_list, key=lambda x: x[1])
+
+
 ALLOWED_JLPT_LEVELS = {"N1", "N2", "N1/N2", "unknown"}
 ALLOWED_VERIFICATION_STATUSES = {"needs_review", "reviewed", "rejected"}
 
