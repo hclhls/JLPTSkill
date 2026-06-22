@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jlpt_pipeline.models import VideoFieldConfig
+
 def get_video_id(url_or_id: str) -> str:
     if "youtube.com" in url_or_id or "youtu.be" in url_or_id:
         # Simple extraction
@@ -40,6 +42,51 @@ def ask_video_words_per_short() -> int | None:
         if value >= 1:
             return value
         print("Please enter a value of 1 or greater.")
+
+def ask_video_field_config() -> VideoFieldConfig | None:
+    """Ask user for video field configuration if TTY.
+
+    Returns VideoFieldConfig if TTY and user confirms, else None (use defaults).
+    """
+    if not sys.stdin.isatty():
+        return None
+
+    print("\n=== Video Field Configuration ===")
+    print("Configure how many times each field appears in the video audio.")
+    print("(Press Enter to use default values)\n")
+
+    # Collect counts
+    term_count_input = input("Term repetition count [default: 2]: ").strip()
+    term_count = int(term_count_input) if term_count_input else 2
+
+    meaning_count_input = input("Meaning repetition count [default: 1]: ").strip()
+    meaning_count = int(meaning_count_input) if meaning_count_input else 1
+
+    example_count_input = input("Example repetition count [default: 1]: ").strip()
+    example_count = int(example_count_input) if example_count_input else 1
+
+    show_translation_input = input("Show example translation? [Y/n]: ").strip().lower()
+    show_example_translation = show_translation_input != "n"
+
+    print("\nConfigure display order (1=first, 2=second, 3=third):")
+    term_order_input = input("Term order [default: 1]: ").strip()
+    term_order = int(term_order_input) if term_order_input else 1
+
+    meaning_order_input = input("Meaning order [default: 2]: ").strip()
+    meaning_order = int(meaning_order_input) if meaning_order_input else 2
+
+    example_order_input = input("Example order [default: 3]: ").strip()
+    example_order = int(example_order_input) if example_order_input else 3
+
+    return VideoFieldConfig(
+        term_count=term_count,
+        meaning_count=meaning_count,
+        example_count=example_count,
+        show_example_translation=show_example_translation,
+        term_order=term_order,
+        meaning_order=meaning_order,
+        example_order=example_order,
+    )
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Automate the JLPT study pipeline for a YouTube video.")
