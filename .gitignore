@@ -16,7 +16,8 @@ __pycache__/
 .env.*
 
 # Generated pipeline output
-out/
+out*
+**/out*
 *.apkg
 *.mp4
 *.mp3
@@ -32,4 +33,5 @@ generate_part4.py
 metadata.txt
 noto-sans-jp.zip
 scratch/
+**/scratch/
 source.json

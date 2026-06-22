@@ -38,79 +38,66 @@ def wrap_text(
 ) -> str:
     """Wrap text to fit within max_width_px, inserting ASS newlines.
 
-    For CJK text: wraps at character boundaries (no spaces in CJK).
-    For Latin text: wraps at word boundaries.
-    Mixed text: wraps at CJK char boundaries or Latin word boundaries.
-
-    Args:
-        text: Text to wrap
-        style: ASS style name ("Term", "Body", etc.) - for future style-specific rules
-        max_width_px: Maximum width in pixels
-        font_size: Font size in points
-
-    Returns:
-        Text with \\N (ASS newline) inserted at wrap points
+    Uses pixel-based measurements for high precision:
+    - CJK characters: 1.0 * font_size
+    - Latin characters: 0.55 * font_size
+    - Spaces: 0.3 * font_size
     """
     if not text:
         return text
 
-    char_width = _estimate_char_width(font_size)
-    max_chars_per_line = int(max_width_px / char_width)
-
-    if max_chars_per_line <= 0:
-        max_chars_per_line = 1
-
     lines: list[str] = []
     current_line: list[str] = []
-    current_width = 0
+    current_width_px = 0.0
+
+    def char_pixel_width(c: str) -> float:
+        return font_size if _is_cjk(c) else font_size * 0.55
 
     i = 0
     while i < len(text):
         char = text[i]
 
         if _is_cjk(char):
-            # CJK character - check if it fits
-            if current_width + 1 > max_chars_per_line:
+            w = char_pixel_width(char)
+            if current_width_px + w > max_width_px:
                 if current_line:
                     lines.append("".join(current_line))
                     current_line = []
-                    current_width = 0
-
+                    current_width_px = 0.0
             current_line.append(char)
-            current_width += 1
+            current_width_px += w
             i += 1
         elif char.isspace():
-            # Space - start new line if needed
-            if current_width > 0:
-                lines.append("".join(current_line))
-                current_line = []
-                current_width = 0
-            i += 1
-        else:
-            # Latin word - collect until space
-            word_chars = []
-            word_width = 0
-            while i < len(text) and not text[i].isspace() and not _is_cjk(text[i]):
-                word_chars.append(text[i])
-                word_width += 1
-                i += 1
-
-            word = "".join(word_chars)
-
-            # Check if word fits on current line
-            if current_width + word_width > max_chars_per_line:
+            w = font_size * 0.3
+            if current_width_px + w > max_width_px:
                 if current_line:
                     lines.append("".join(current_line))
                     current_line = []
-                    current_width = 0
-
+                    current_width_px = 0.0
+            if current_line:
+                current_line.append(char)
+                current_width_px += w
+            i += 1
+        else:
+            word_chars = []
+            word_w = 0.0
+            while i < len(text) and not text[i].isspace() and not _is_cjk(text[i]):
+                word_chars.append(text[i])
+                word_w += char_pixel_width(text[i])
+                i += 1
+            word = "".join(word_chars)
+            if current_width_px + word_w > max_width_px:
+                if current_line:
+                    lines.append("".join(current_line))
+                    current_line = []
+                    current_width_px = 0.0
             current_line.append(word)
-            current_width += word_width
+            current_width_px += word_w
 
     if current_line:
         lines.append("".join(current_line))
 
-    return r"\N".join(lines)
+    return "\n".join(lines)
 
 
 FALLBACK_ITEM_SECONDS = 2.5
@@ -140,6 +127,8 @@ def get_example_text(entry: dict[str, Any], example_style: str = EXAMPLE_STYLE_S
     if "term_in" in entry:
         return f"他：{entry['example_ja_tr']}\n（{entry['example_zh_tw_tr']}）\n自：{entry['example_ja_in']}\n（{entry['example_zh_tw_in']}）"
     example_ja = resolve_example(entry, example_style)
+    if example_style == "phrase":
+        return f"{example_ja}（{entry['kana']}）"
     if "notes" in entry and entry["notes"]:
         return f"{example_ja}\n（{entry['example_zh_tw']}）\n備註：{entry['notes']}"
     res = f"{example_ja}\n（{entry['example_zh_tw']}）"
@@ -260,41 +249,27 @@ def timeline_items(
 ) -> list[dict[str, Any]]:
     """Build timeline items from source entries.
 
-    The "term" field is shown as a single unbroken visual segment but its audio
-    plays `config.term_count` times in a row (no silence gap between the repetitions).
-    The Chinese example translation is shown inline on the same frame as the
-    Japanese example sentence and has no separate audio clip.
+    Ordered and repeated based on config fields.
     """
     if config is None:
         config = VideoFieldConfig()
 
-    # Build a per-entry VIDEO_ITEM_FIELDS that uses the resolved example style
-    def _fields_for_entry(entry: dict[str, Any]):
-        return [
-            ("Term", "term", get_term_text),
-            ("Body", "zh_tw_meaning", get_meaning_text),
-            ("Body", "example_ja", lambda e: get_example_text(e, example_style)),
-        ]
-
-    # audio_paths order (per entry): term_1, ..., term_N, zh_tw_meaning, example_ja
-    # (example_zh_tw audio is omitted from the pipeline)
     audio_iter = iter(audio_paths or [])
     current = 0.0
     items: list[dict[str, Any]] = []
 
     for entry in active_entries(source):
-        for style, kind, text_for_entry in _fields_for_entry(entry):
-            if kind == "term":
-                # Consume all term audio clips; combine their durations so
-                # there is no visual gap between the repetitions.
+        for field_name, _ in config.ordered_fields():
+            if field_name == "term":
+                if config.term_count == 0:
+                    continue
                 term_audios = []
                 for _ in range(config.term_count):
                     term_audios.append(next(audio_iter, None))
 
                 duration = 0.0
                 if audio_paths is None:
-                    # Silent video fallback or when no audio paths are provided at all
-                    duration = max(config.term_count, 1) * FALLBACK_ITEM_SECONDS
+                    duration = config.term_count * FALLBACK_ITEM_SECONDS
                 else:
                     for audio in term_audios:
                         dur = FALLBACK_ITEM_SECONDS
@@ -307,36 +282,82 @@ def timeline_items(
                     {
                         "start": current,
                         "end": end,
-                        "style": style,
-                        "kind": kind,
-                        "text": text_for_entry(entry),
-                        # Store all audio paths for concat
+                        "style": "Term",
+                        "kind": "term",
+                        "text": get_term_text(entry),
                         "audio_paths": term_audios,
                         "audio_path": term_audios[0] if len(term_audios) > 0 else None,
                         "audio_path2": term_audios[1] if len(term_audios) > 1 else None,
                         "duration": duration,
                     }
                 )
-            else:
-                audio_path = next(audio_iter, None)
-                duration = FALLBACK_ITEM_SECONDS
-                if audio_path is not None and audio_path.exists():
-                    duration = max(audio_duration_seconds(audio_path), 0.1)
+                current = end + AUDIO_GAP_SECONDS
+
+            elif field_name == "meaning":
+                if config.meaning_count == 0:
+                    continue
+                meaning_audios = []
+                for _ in range(config.meaning_count):
+                    meaning_audios.append(next(audio_iter, None))
+
+                duration = 0.0
+                if audio_paths is None:
+                    duration = config.meaning_count * FALLBACK_ITEM_SECONDS
+                else:
+                    for audio in meaning_audios:
+                        dur = FALLBACK_ITEM_SECONDS
+                        if audio is not None and audio.exists():
+                            dur = max(audio_duration_seconds(audio), 0.1)
+                        duration += dur
+
                 end = current + duration
                 items.append(
                     {
                         "start": current,
                         "end": end,
-                        "style": style,
-                        "kind": kind,
-                        "text": text_for_entry(entry),
-                        "audio_paths": [audio_path] if audio_path is not None else [],
-                        "audio_path": audio_path,
+                        "style": "Body",
+                        "kind": "zh_tw_meaning",
+                        "text": get_meaning_text(entry),
+                        "audio_paths": meaning_audios,
+                        "audio_path": meaning_audios[0] if len(meaning_audios) > 0 else None,
                         "audio_path2": None,
                         "duration": duration,
                     }
                 )
-            current = end + AUDIO_GAP_SECONDS
+                current = end + AUDIO_GAP_SECONDS
+
+            elif field_name == "example":
+                if config.example_count == 0:
+                    continue
+                example_audios = []
+                for _ in range(config.example_count):
+                    example_audios.append(next(audio_iter, None))
+
+                duration = 0.0
+                if audio_paths is None:
+                    duration = config.example_count * FALLBACK_ITEM_SECONDS
+                else:
+                    for audio in example_audios:
+                        dur = FALLBACK_ITEM_SECONDS
+                        if audio is not None and audio.exists():
+                            dur = max(audio_duration_seconds(audio), 0.1)
+                        duration += dur
+
+                end = current + duration
+                items.append(
+                    {
+                        "start": current,
+                        "end": end,
+                        "style": "Body",
+                        "kind": "example_ja",
+                        "text": get_example_text(entry, example_style),
+                        "audio_paths": example_audios,
+                        "audio_path": example_audios[0] if len(example_audios) > 0 else None,
+                        "audio_path2": None,
+                        "duration": duration,
+                    }
+                )
+                current = end + AUDIO_GAP_SECONDS
 
     return items
 
@@ -376,15 +397,50 @@ def write_subtitles(
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     config: VideoFieldConfig | None = None,
+    portrait: bool = False,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     output = out_dir / "subtitles.ass"
     template = _template_env().get_template("video_scene.ass.j2")
     title = source.get("metadata", {}).get("topic") or "JLPT Study"
+
+    if portrait:
+        play_res_x = 1080
+        play_res_y = 1920
+        term_font_size = 80
+        body_font_size = 52
+        term_max_width = 960
+        body_max_width = 1000
+    else:
+        play_res_x = 1920
+        play_res_y = 1080
+        term_font_size = 128
+        body_font_size = 76
+        term_max_width = 1680
+        body_max_width = 1620
+
+    raw_lines = subtitle_lines(source, audio_paths=audio_paths, example_style=example_style, config=config)
+    wrapped_lines = []
+    for line in raw_lines:
+        style = line["style"]
+        text = line["text"]
+        if style == "Term":
+            wrapped = wrap_text(text, style, term_max_width, term_font_size)
+        else:
+            wrapped = wrap_text(text, style, body_max_width, body_font_size)
+        wrapped_lines.append({
+            **line,
+            "text": wrapped
+        })
+
     output.write_text(
         template.render(
             title=title,
-            lines=subtitle_lines(source, audio_paths=audio_paths, example_style=example_style, config=config),
+            lines=wrapped_lines,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+            term_font_size=term_font_size,
+            body_font_size=body_font_size,
         ),
         encoding="utf-8",
     )
@@ -396,7 +452,7 @@ def ffmpeg_available() -> bool:
 
 
 def _entry_audio_count(config: VideoFieldConfig) -> int:
-    return max(config.term_count, 1) + 2
+    return config.term_count + config.meaning_count + config.example_count
 
 
 def _chunked(items: list[Any], chunk_size: int) -> list[list[Any]]:
@@ -541,6 +597,7 @@ def write_video_file(
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     config: VideoFieldConfig | None = None,
+    portrait: bool = False,
 ) -> Path | None:
     if not ffmpeg_available():
         return None
@@ -550,13 +607,16 @@ def write_video_file(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     timed_audio = audio_paths or None
-    subtitles = write_subtitles(source, out_dir, audio_paths=timed_audio, example_style=example_style, config=config)
+    subtitles = write_subtitles(
+        source, out_dir, audio_paths=timed_audio, example_style=example_style, config=config, portrait=portrait
+    )
     fonts_dir = bundled_fonts_dir()
     output = out_dir / "video.mp4"
     duration = timeline_duration(source, audio_paths=timed_audio, example_style=example_style, config=config)
 
     # Check if there are usable audio files
     usable_audio = [path for path in audio_paths or [] if path.exists()]
+    res_str = "1080x1920" if portrait else "1920x1080"
 
     if usable_audio:
         # Generate silence files matching the edge-tts format (24000Hz mono MP3)
@@ -605,7 +665,7 @@ def write_video_file(
             "-f",
             "lavfi",
             "-i",
-            f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
+            f"color=c=0x111111:s={res_str}:d={duration:.1f}",
             "-i",
             narration_combined.as_posix(),
             "-vf",
@@ -634,7 +694,7 @@ def write_video_file(
             "-f",
             "lavfi",
             "-i",
-            f"color=c=0x111111:s=1920x1080:d={duration:.1f}",
+            f"color=c=0x111111:s={res_str}:d={duration:.1f}",
             "-vf",
             ffmpeg_filter_path(subtitles, fonts_dir=fonts_dir),
             "-c:v",
@@ -658,8 +718,9 @@ def write_silent_video(
     out_dir: Path,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     config: VideoFieldConfig | None = None,
+    portrait: bool = False,
 ) -> Path | None:
-    return write_video_file(source, out_dir, audio_paths=None, example_style=example_style, config=config)
+    return write_video_file(source, out_dir, audio_paths=None, example_style=example_style, config=config, portrait=portrait)
 
 
 def build_video_assets(
@@ -670,25 +731,28 @@ def build_video_assets(
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     config: VideoFieldConfig | None = None,
     words_per_short: int | None = None,
+    portrait: bool = False,
 ) -> dict[str, Path | None]:
     if config is None:
         config = VideoFieldConfig()
 
-    # Convert dict-based audio_paths to flat list for old-style functions
+    # Convert dict-based audio_paths to flat list for old-style functions without duplication
     flat_audio_paths: list[Path] | None = None
     if isinstance(audio_paths, dict):
-        # Flatten the dict to a list by iterating through entries in source order
+        local_paths = {k: list(v) for k, v in audio_paths.items()}
         flat_audio_paths = []
         items = tts_items(source, config=config, example_style=example_style)
         for item in items:
             key = (item.entry_id, item.kind)
-            if key in audio_paths:
-                flat_audio_paths.extend(audio_paths[key])
+            if key in local_paths and local_paths[key]:
+                flat_audio_paths.append(local_paths[key].pop(0))
     else:
         flat_audio_paths = audio_paths
 
     narration = write_narration(source, out_dir, example_style=example_style)
-    subtitles = write_subtitles(source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config)
+    subtitles = write_subtitles(
+        source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config, portrait=portrait
+    )
     video = None
     videos: list[Path] = []
 
@@ -700,9 +764,12 @@ def build_video_assets(
             audio_paths=flat_audio_paths,
             example_style=example_style,
             config=config,
+            portrait=portrait,
         )
     elif make_video:
-        video = write_video_file(source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config)
+        video = write_video_file(
+            source, out_dir, audio_paths=flat_audio_paths, example_style=example_style, config=config, portrait=portrait
+        )
 
     return {"narration": narration, "subtitles": subtitles, "video": video, "videos": videos}
 
@@ -714,6 +781,7 @@ def write_short_videos(
     audio_paths: list[Path] | None = None,
     example_style: str = EXAMPLE_STYLE_SENTENCE,
     config: VideoFieldConfig | None = None,
+    portrait: bool = False,
 ) -> list[Path]:
     if words_per_short < 1:
         raise ValueError("words_per_short must be at least 1")
@@ -744,6 +812,7 @@ def write_short_videos(
             audio_paths=chunk_audio,
             example_style=example_style,
             config=config,
+            portrait=portrait,
         )
         if video is not None:
             videos.append(video)

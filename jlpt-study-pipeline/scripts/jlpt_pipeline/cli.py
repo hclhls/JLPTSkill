@@ -240,6 +240,7 @@ def _build_command(args: argparse.Namespace) -> int:
             example_style=args.example_style,
             config=video_field_config,
             words_per_short=args.video_words_per_short,
+            portrait=args.shorts_portrait,
         )
     except Exception as error:
         video_error = str(error)
