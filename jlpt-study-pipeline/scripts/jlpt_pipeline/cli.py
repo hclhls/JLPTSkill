@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .anki import write_anki_csv, write_anki_package
-from .models import ValidationReport, EXAMPLE_STYLE_SENTENCE
+from .models import ValidationReport, VideoFieldConfig, EXAMPLE_STYLE_SENTENCE
 from .obsidian import write_obsidian_markdown
 from .tts import (
     DEFAULT_PROVIDER,
@@ -33,19 +33,17 @@ def _parser() -> argparse.ArgumentParser:
     validate = subcommands.add_parser("validate")
     _add_source_out_args(validate)
     _add_example_style_arg(validate)
-    _add_word_repetition_arg(validate)
     validate.set_defaults(command=_validate_command)
 
     dry_run = subcommands.add_parser("dry-run")
     _add_source_out_args(dry_run)
     _add_example_style_arg(dry_run)
-    _add_word_repetition_arg(dry_run)
     dry_run.set_defaults(command=_dry_run_command)
 
     build = subcommands.add_parser("build")
     _add_source_out_args(build)
     _add_example_style_arg(build)
-    _add_word_repetition_arg(build)
+    _add_video_field_config_args(build)
     _add_video_words_per_short_arg(build)
     build.add_argument("--deck-name", required=True)
     build.add_argument(
@@ -82,12 +80,60 @@ def _add_example_style_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_word_repetition_arg(parser: argparse.ArgumentParser) -> None:
+def _add_video_field_config_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--word-repetition",
-        default=2,
+        "--term-count",
         type=int,
-        help="Number of times the Japanese vocabulary is read out (default: 2)",
+        default=2,
+        help="Number of times to repeat the term/vocabulary in audio (default: 2)",
+    )
+    parser.add_argument(
+        "--meaning-count",
+        type=int,
+        default=1,
+        help="Number of times to repeat the meaning/translation in audio (default: 1)",
+    )
+    parser.add_argument(
+        "--example-count",
+        type=int,
+        default=1,
+        help="Number of times to repeat the example sentence in audio (default: 1)",
+    )
+    parser.add_argument(
+        "--show-example-translation",
+        action="store_true",
+        default=True,
+        help="Show English translation of example sentences (default: True)",
+    )
+    parser.add_argument(
+        "--no-show-example-translation",
+        action="store_false",
+        dest="show_example_translation",
+        help="Hide English translation of example sentences",
+    )
+    parser.add_argument(
+        "--term-order",
+        type=int,
+        default=1,
+        help="Display order for term (1-3, default: 1)",
+    )
+    parser.add_argument(
+        "--meaning-order",
+        type=int,
+        default=2,
+        help="Display order for meaning (1-3, default: 2)",
+    )
+    parser.add_argument(
+        "--example-order",
+        type=int,
+        default=3,
+        help="Display order for example (1-3, default: 3)",
+    )
+    parser.add_argument(
+        "--shorts-portrait",
+        action="store_true",
+        default=False,
+        help="Use vertical 1080×1920 format for short videos (default: False)",
     )
 
 
@@ -129,14 +175,13 @@ def _dry_run_command(args: argparse.Namespace) -> int:
         _write_report(args.out, render_validation_report(report))
         return 1
 
-    estimate = estimate_tts_chars(source, example_style=args.example_style, word_repetition=args.word_repetition)
+    estimate = estimate_tts_chars(source, example_style=args.example_style)
     report_text = _append_sections(
         render_validation_report(report),
         "Dry Run",
         [
             f"Estimated TTS characters: {estimate.total_chars}",
             f"Example style: {args.example_style}",
-            f"Word repetition count: {args.word_repetition}",
         ],
     )
     _write_report(args.out, report_text)
@@ -154,6 +199,16 @@ def _build_command(args: argparse.Namespace) -> int:
         _write_report(args.out, report_text)
         return 1
 
+    video_field_config = VideoFieldConfig(
+        term_count=args.term_count,
+        meaning_count=args.meaning_count,
+        example_count=args.example_count,
+        show_example_translation=args.show_example_translation,
+        term_order=args.term_order,
+        meaning_order=args.meaning_order,
+        example_order=args.example_order,
+    )
+
     obsidian = write_obsidian_markdown(source, args.out, args.slug)
     anki_csv = write_anki_csv(source, args.out, example_style=args.example_style)
     anki_package = write_anki_package(source, args.out, args.deck_name, example_style=args.example_style)
@@ -166,12 +221,12 @@ def _build_command(args: argparse.Namespace) -> int:
         max_chars=args.max_tts_chars,
         use_cache=not args.no_tts_cache,
         example_style=args.example_style,
-        word_repetition=args.word_repetition,
+        word_repetition=video_field_config.term_count,
     )
     audio_paths = audio_paths_for_source(
         source, args.out, voice=args.voice, zh_voice=args.zh_voice,
         example_style=args.example_style,
-        word_repetition=args.word_repetition,
+        word_repetition=video_field_config.term_count,
     )
     video_assets: dict[str, Path | None] = {
         "narration": None,
@@ -183,7 +238,7 @@ def _build_command(args: argparse.Namespace) -> int:
         video_assets = build_video_assets(
             source, args.out, make_video=args.video, audio_paths=audio_paths,
             example_style=args.example_style,
-            word_repetition=args.word_repetition,
+            word_repetition=video_field_config.term_count,
             words_per_short=args.video_words_per_short,
         )
     except Exception as error:
@@ -214,7 +269,7 @@ def _build_command(args: argparse.Namespace) -> int:
         f"TTS status: {tts_status}",
         f"- Provider: {args.tts_provider}",
         f"- Example style: {args.example_style}",
-        f"- Word repetition count: {args.word_repetition}",
+        f"- Term count: {video_field_config.term_count}",
         f"- Video words per short: {args.video_words_per_short or 'long video'}",
         f"- Generated: {len(tts_result.generated)}",
         f"- Skipped: {tts_result.skipped}",

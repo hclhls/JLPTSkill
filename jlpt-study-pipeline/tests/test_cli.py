@@ -175,3 +175,71 @@ def test_build_command_passes_words_per_short_to_video_assets(tmp_path, monkeypa
     report_text = (tmp_path / "validation_report.md").read_text(encoding="utf-8")
     assert "Short video: shorts/short_001/video.mp4" in report_text
     assert "Video words per short: 1" in report_text
+
+
+def test_cli_has_term_count_arg():
+    """Verify --term-count argument exists in build command."""
+    from jlpt_pipeline.cli import _parser
+
+    parser = _parser()
+    args = parser.parse_args([
+        "build",
+        "--source", "dummy.json",
+        "--out", "/tmp/out",
+        "--deck-name", "Test",
+        "--term-count", "3",
+    ])
+
+    assert hasattr(args, "term_count")
+    assert args.term_count == 3
+
+
+def test_cli_has_meaning_count_arg():
+    """Verify --meaning-count argument exists."""
+    from jlpt_pipeline.cli import _parser
+
+    parser = _parser()
+    args = parser.parse_args([
+        "build",
+        "--source", "dummy.json",
+        "--out", "/tmp/out",
+        "--deck-name", "Test",
+        "--meaning-count", "2",
+    ])
+
+    assert hasattr(args, "meaning_count")
+    assert args.meaning_count == 2
+
+
+def test_cli_has_show_example_translation_flag():
+    """Verify --show-example-translation flag."""
+    from jlpt_pipeline.cli import _parser
+
+    parser = _parser()
+    args = parser.parse_args([
+        "build",
+        "--source", "dummy.json",
+        "--out", "/tmp/out",
+        "--deck-name", "Test",
+        "--no-show-example-translation",
+    ])
+
+    assert hasattr(args, "show_example_translation")
+    assert args.show_example_translation is False
+
+
+def test_cli_has_shorts_portrait_flag():
+    """Verify --shorts-portrait flag."""
+    from jlpt_pipeline.cli import _parser
+
+    parser = _parser()
+    args = parser.parse_args([
+        "build",
+        "--source", "dummy.json",
+        "--out", "/tmp/out",
+        "--deck-name", "Test",
+        "--shorts-portrait",
+    ])
+
+    assert hasattr(args, "shorts_portrait")
+    assert args.shorts_portrait is True
